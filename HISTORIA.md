@@ -1876,7 +1876,7 @@ User po zobaczeniu pierwszej wersji (tekstowe podsumowanie jako fallback): "nie,
 
 **Doprecyzowane pytaniami**: czy link ma wyglądać jak ładne zaproszenie (karta z tytułem/opisem w komunikatorze — TAK, przez Open Graph meta tagi) i czy dane mogą być przechowywane do daty rozpoczęcia podróży (TAK). User wybrał: krótki link + zapis na serwerze (zamiast całego JSON-a zakodowanego w URL-u) — ładniejszy link, prawdziwe czyszczenie po dacie.
 
-**Nowy backend na VPS** (`root@204.168.216.7`, ten sam wzorzec co istniejący `/opt/macamp_subscribe_server.py` — czysty Python stdlib, `ThreadingHTTPServer`, zero zależności zewnętrznych):
+**Nowy backend na VPS** (ten sam wzorzec co istniejący `/opt/macamp_subscribe_server.py` — czysty Python stdlib, `ThreadingHTTPServer`, zero zależności zewnętrznych):
 - `/opt/pmemories_share_server.py` — `POST /pmemories/api/trips` (zapisuje JSON podróży, zwraca krótkie ID), `GET /pmemories/api/trips/<id>` (appka pobiera dane do importu), `GET /pmemories/trip/<id>` (strona HTML z Open Graph tagami — tytuł/trasa jako karta w komunikatorze, plus link "Open in PMemories" jako fallback dla userów bez appki).
 - Sprzątanie LENIWE (bez cron/timera) — przy każdym nowym zapisie appka usuwa pliki których `endDate`/`startDate` + 3 dni zapasu już minęły.
 - Systemd service `pmemories-share.service` (port 127.0.0.1:8091), `nginx` proxy `/pmemories/` na domenie `piotrmarkowski.duckdns.org` (backup configu zrobiony przed edycją: `portfolio.bak_20260812_010110_before_pmemories_share`).
