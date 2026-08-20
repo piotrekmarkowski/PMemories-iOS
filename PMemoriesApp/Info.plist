@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>PMemories</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>PMemories Trip</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.piotrmarkowski.pmemories.trip</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.2</string>
+	<key>CFBundleVersion</key>
+	<string>14</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>PMemories potrzebuje dostępu do muzyki, aby dodać wybrany utwór do filmiku.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>PMemories może użyć Twojej lokalizacji, żeby rozpoznać nazwę szczytu podczas wędrówki — tylko gdy sam o to poprosisz, appka nie śledzi lokalizacji w tle.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>PMemories zapisuje gotowy filmik z powrotem do Twojej biblioteki zdjęć.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>PMemories potrzebuje dostępu do zdjęć i filmów, aby połączyć je w filmik.</string>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>PMemories Planned Trip</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.piotrmarkowski.pmemories.trip</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>pmtrip</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -1,0 +1,11 @@
+# Zbudowane archiwa/eksporty (regenerowalne przez xcodebuild, 400MB+)
+build/
+
+# macOS
+.DS_Store
+
+# Xcode — dane specyficzne dla lokalnej maszyny/użytkownika (nieistotne
+# przy tym projekcie, ale standardowy wzorzec na przyszłość)
+xcuserdata/
+*.xcuserstate
+DerivedData/

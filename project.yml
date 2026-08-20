@@ -1,0 +1,94 @@
+name: PMemoriesApp
+options:
+  bundleIdPrefix: com.piotrmarkowski
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+targets:
+  PMemoriesApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: PMemoriesApp
+    info:
+      path: PMemoriesApp/Info.plist
+      properties:
+        UILaunchScreen: {}
+        CFBundleDisplayName: "PMemories"
+        NSPhotoLibraryUsageDescription: "PMemories potrzebuje dostępu do zdjęć i filmów, aby połączyć je w filmik."
+        NSPhotoLibraryAddUsageDescription: "PMemories zapisuje gotowy filmik z powrotem do Twojej biblioteki zdjęć."
+        NSAppleMusicUsageDescription: "PMemories potrzebuje dostępu do muzyki, aby dodać wybrany utwór do filmiku."
+        NSLocationWhenInUseUsageDescription: "PMemories może użyć Twojej lokalizacji, żeby rozpoznać nazwę szczytu podczas wędrówki — tylko gdy sam o to poprosisz, appka nie śledzi lokalizacji w tle."
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        CFBundleShortVersionString: "1.0.2"
+        CFBundleVersion: "14"
+        ITSAppUsesNonExemptEncryption: false
+        LSSupportsOpeningDocumentsInPlace: true
+        # Wysyłanie zaplanowanej podróży do kogoś innego (11.08.2026) —
+        # plik `.pmtrip` (JSON) przez natywny Share Sheet, otwierany z
+        # powrotem w PMemories z Wiadomości/AirDrop/Poczty przez te wpisy.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.piotrmarkowski.pmemories.trip
+            UTTypeConformsTo:
+              - public.json
+            UTTypeDescription: "PMemories Planned Trip"
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - pmtrip
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: "PMemories Trip"
+            LSItemContentTypes:
+              - com.piotrmarkowski.pmemories.trip
+            LSHandlerRank: Owner
+    entitlements:
+      path: PMemoriesApp/PMemoriesApp.entitlements
+      properties:
+        com.apple.developer.applesignin:
+          - Default
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.com.piotrmarkowski.pmemories
+        com.apple.developer.icloud-services:
+          - CloudKit
+        # Universal Links dla udostępniania zaplanowanych podróży (12.08.2026)
+        # — link otwarty na drugim telefonie (nawet z Messengera, który nie
+        # przyjmuje niestandardowych plików) trafia bezpośrednio do appki
+        # zamiast do Safari. `apple-app-site-association` na tej samej
+        # domenie co portfolio, patrz `pmemories_share_server.py`.
+        com.apple.developer.associated-domains:
+          - applinks:pmemories.duckdns.org
+          - applinks:piotrmarkowski.duckdns.org
+        # BEZ tego lokalne buildy z Xcode/devicectl (Debug, podpis
+        # deweloperski) łączą się z osobną bazą CloudKit "Development",
+        # niewidoczną z appki dystrybuowanej przez TestFlight ("Production")
+        # — 09.08.2026, user zalogowany lokalnie nie widział w rankingu
+        # narzeczonej (i odwrotnie), bo byli na dwóch różnych bazach mimo
+        # tego samego kontenera. To WYMUSZA Production zawsze, niezależnie
+        # od typu podpisu/profilu provisioningu.
+        com.apple.developer.icloud-container-environment: Production
+    settings:
+      base:
+        PRODUCT_NAME: PMemories
+        PRODUCT_BUNDLE_IDENTIFIER: com.piotrmarkowski.pmemories
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: X3NAM3PL95
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: "YES"
+        ENABLE_PREVIEWS: "YES"
+schemes:
+  PMemoriesApp:
+    build:
+      targets:
+        PMemoriesApp: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
