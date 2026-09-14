@@ -80,7 +80,17 @@ struct EditView: View {
     @State private var selectedOverlayIndex: Int?
     @State private var isShowingOverlaySettings = false
 
-    var body: some View {
+    // 14.09.2026 — `body` rozbite na trzy niezależnie sprawdzane
+    // właściwości zamiast jednego, wciąż rosnącego łańcucha modyfikatorów.
+    // Powód ten sam co przy `styleModifiers` (komentarz niżej) — na
+    // GitHub Actions CI (wolniejszy/inny CPU niż lokalny Mac) skompilowanie
+    // JEDNEGO `body` naprawdę padało: "the compiler is unable to type-check
+    // this expression in reasonable time". Lokalnie budowało się bez
+    // problemu, więc łatwo to przeoczyć — złapane dopiero przy pierwszym
+    // realnym CI na tym pliku. Granica właściwości = granica
+    // type-checkingu w Swifcie, stąd podział na `coreContent`/
+    // `withSheetsAndPickers`/`body`, zero zmian w samej logice/zachowaniu.
+    private var coreContent: some View {
         VStack(spacing: 0) {
             topBar
             preview
@@ -137,6 +147,10 @@ struct EditView: View {
         // Swifta (ten sam, już kilkukrotnie spotykany w tym pliku błąd
         // kompilacji), dwa kolejne dopisane 09.08.2026 go przekroczyły.
         .background(styleModifiers)
+    }
+
+    private var withSheetsAndPickers: some View {
+        coreContent
         .onChange(of: captions) { _, _ in syncProject() }
         .sheet(isPresented: $isShowingCaptions) {
             CaptionsView(captions: $captions, totalDuration: items.reduce(0) { $0 + $1.duration })
@@ -197,6 +211,10 @@ struct EditView: View {
             )
             .ignoresSafeArea()
         }
+    }
+
+    var body: some View {
+        withSheetsAndPickers
         .alert("Saved to camera roll", isPresented: $didExportSucceed) {
             Button("OK", role: .cancel) {}
         }
