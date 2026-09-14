@@ -13,6 +13,16 @@ name: iOS CI
 # wyprzedzeniem (zmienia się z obrazem), więc krok niżej wybiera automatycznie
 # PIERWSZY dostępny symulator iPhone zamiast zgadywać na sztywno nazwę.
 #
+# Etap 3 (14.09.2026): powiadomienia na Telegram (bot "PMemories CI",
+# osobny od bota tradingowego PMQuant — świadomie, żeby alerty appki nie
+# mieszały się z sygnałami tradingowymi w tym samym czacie) — token/chat ID
+# w sekretach repo (`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`), nigdy w kodzie.
+# Świadomie BEZ auto-fixa i BEZ auto-deploya — user: "chcę mieć nad tym
+# kontrolę, chcę żeby mi wykrywał błędy... a naprawę zlecasz mi ręcznie".
+# CI tylko wykrywa i informuje (co się zepsuło + link do logu, a przy
+# kolejnym zielonym pushu — potwierdzenie że naprawione), nic nie robi
+# samo z appką/repo poza tym.
+#
 # Świadomie NIE robi (jeszcze): archiwizacji/uploadu na TestFlight — wymaga
 # sekretów podpisywania (klucz API App Store Connect), osobny, późniejszy
 # etap. Rozwój etapami, nie wszystko naraz — ten sam duch co reszta projektu.
@@ -78,16 +88,62 @@ jobs:
       # przyczyną błędu "has no member" okazał się Xcode 16.4 (patrz krok
       # "Select Xcode 26.3" wyżej) — zostaje mimo to, bo to i tak lepszy
       # wzorzec niż jedno połączone `xcodebuild test`.
+      # `set -o pipefail` KRYTYCZNE — bez tego `| tee` maskuje kod wyjścia
+      # xcodebuild (pipe bez pipefail zwraca kod OSTATNIEGO polecenia, czyli
+      # zawsze-udanego `tee`), więc krok "udawałby" sukces nawet gdy build
+      # faktycznie padł, i powiadomienie Telegram niżej nigdy by się nie
+      # odpaliło.
       - name: Build for Testing
         run: |
+          set -o pipefail
           xcodebuild build-for-testing \
             -project PMemoriesApp.xcodeproj \
             -scheme PMemoriesApp \
-            -destination "id=${{ steps.simulator.outputs.udid }}"
+            -destination "id=${{ steps.simulator.outputs.udid }}" \
+            2>&1 | tee build.log
 
       - name: Run Tests
         run: |
+          set -o pipefail
           xcodebuild test-without-building \
             -project PMemoriesApp.xcodeproj \
             -scheme PMemoriesApp \
-            -destination "id=${{ steps.simulator.outputs.udid }}"
+            -destination "id=${{ steps.simulator.outputs.udid }}" \
+            2>&1 | tee test.log
+
+      # 14.09.2026 — user: "chcę dostawać info na Telegram co było błędem i
+      # czy naprawione", ŚWIADOMIE bez auto-fixa/auto-deploya (chce
+      # zachować kontrolę nad tym co się realnie zmienia w appce) — samo
+      # wykrywanie + powiadamianie, naprawę zleca ręcznie. `if: failure()`/
+      # `if: success()` odpalają się WYŁĄCZNIE gdy poprzednie kroki JOBA
+      # faktycznie failed/passed (standardowa semantyka GitHub Actions),
+      # więc drugi krok nigdy nie wyśle "naprawione" po failu.
+      - name: Notify Telegram on failure
+        if: failure()
+        run: |
+          ERRORS=$(grep -h "error:" build.log test.log 2>/dev/null | head -5)
+          if [ -z "$ERRORS" ]; then ERRORS="(zobacz pełny log pod linkiem niżej)"; fi
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title }}"
+          MESSAGE="❌ PMemories CI FAILED
+Gałąź: ${{ github.ref_name }}
+Commit: ${COMMIT_MSG}
+
+Błędy:
+${ERRORS}
+
+${RUN_URL}"
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=${MESSAGE}" > /dev/null
+
+      - name: Notify Telegram on success
+        if: success()
+        run: |
+          COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title }}"
+          MESSAGE="✅ PMemories CI passed
+Gałąź: ${{ github.ref_name }}
+Commit: ${COMMIT_MSG}"
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=${MESSAGE}" > /dev/null
