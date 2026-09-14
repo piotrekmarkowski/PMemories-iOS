@@ -38,6 +38,17 @@ jobs:
       - name: List available Xcode versions
         run: ls /Applications | grep Xcode
 
+      # 14.09.2026: domyślny Xcode na tym obrazie runnera to 16.4 (dużo
+      # starszy niż lokalny 26.6) — z nim `build-for-testing` padał na
+      # fałszywym "type 'TravelAchievementsCalculator' has no member
+      # 'countryGroupingCode'" (symbol REALNIE istnieje, kompiluje się
+      # lokalnie bez problemu) — wygląda na quirk starszego Swift
+      # compilera przy `@testable import` + explicit module builds.
+      # Runner ma też zainstalowane 26.3 — jawny wybór zamiast polegania
+      # na domyślnym `xcode-select`.
+      - name: Select Xcode 26.3
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
@@ -60,16 +71,13 @@ jobs:
           echo "Picked simulator UDID: $UDID"
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
 
-      # Rozbite na dwa kroki (nie jedno `xcodebuild test`) — pierwsza próba
-      # na runnerze GitHuba (Xcode 16.4, inny niż lokalny 26.6) padła z
-      # myloącym "type 'TravelAchievementsCalculator' has no member
-      # 'countryGroupingCode'", mimo że appka i testy osobno budują się bez
-      # problemu — wyścig w harmonogramowaniu buildu, gdzie kompilacja testu
-      # startowała zanim moduł appki (`@testable import PMemories`) zdążył
-      # się w pełni wyemitować. `build-for-testing`/`test-without-building`
-      # to standardowy, niezawodny wzorzec CI właśnie na tego typu wyścigi —
-      # pierwszy krok kończy KOMPLETNIE cały build (appkę + testy) zanim
-      # cokolwiek zacznie się uruchamiać.
+      # Rozbite na dwa kroki (nie jedno `xcodebuild test`) — standardowy,
+      # bardziej niezawodny wzorzec CI (przydatny też np. do współdzielenia
+      # jednego builda między kilkoma równoległymi runami testów). Pierwotnie
+      # podejrzewany jako fix na wyścig w harmonogramowaniu, ale prawdziwą
+      # przyczyną błędu "has no member" okazał się Xcode 16.4 (patrz krok
+      # "Select Xcode 26.3" wyżej) — zostaje mimo to, bo to i tak lepszy
+      # wzorzec niż jedno połączone `xcodebuild test`.
       - name: Build for Testing
         run: |
           xcodebuild build-for-testing \
