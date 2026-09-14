@@ -1,0 +1,50 @@
+name: iOS CI
+
+# Etap 1 CI/CD (13.09.2026) — sama Continuous Integration: przy każdym pushu
+# i każdym PR do main appka buduje się na symulatorze, bez podpisywania
+# (CODE_SIGNING_ALLOWED=NO — build na symulator go nie wymaga). Cel: złapać
+# błąd kompilacji/zapomniany `xcodegen generate` automatycznie, zanim
+# ktokolwiek zdąży się o nim dowiedzieć ręcznie — dokładnie ten gotcha, który
+# w tym projekcie powtarzał się kilka razy ("nowy plik .swift wymaga
+# `xcodegen generate` przed buildem", patrz HISTORIA.md).
+#
+# Świadomie NIE robi (jeszcze): testów (projekt ich dziś nie ma), archiwizacji
+# na urządzenie/TestFlight (wymaga sekretów podpisywania — osobny, późniejszy
+# etap). Rozwój etapami, nie wszystko naraz — ten sam duch co reszta projektu.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build (Simulator)
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Diagnostyczne — jeśli build kiedyś padnie na brakującym SDK, ten
+      # log od razu pokaże co runner GitHuba faktycznie ma zainstalowane,
+      # zamiast zgadywać.
+      - name: List available Xcode versions
+        run: ls /Applications | grep Xcode
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build for Simulator
+        run: |
+          xcodebuild build \
+            -project PMemoriesApp.xcodeproj \
+            -scheme PMemoriesApp \
+            -sdk iphonesimulator \
+            -destination "generic/platform=iOS Simulator" \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO
