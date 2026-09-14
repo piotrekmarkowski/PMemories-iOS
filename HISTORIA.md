@@ -3676,3 +3676,25 @@ User zainteresowany tematem CI/CD po przejrzeniu oferty pracy iOS Developer (Lin
 - Merge PR-a do `main` zablokowany przez klasyfikator uprawnień auto-mode (słusznie — zmiana na współdzielonej gałęzi) — user scala ręcznie albo mówi "scal".
 
 **Świadomie NIE zrobione jeszcze** (kolejne etapy, user poinformowany): testy jednostkowe (projekt ma dziś zero testów), automatyczny upload na TestFlight (wymaga kluczy API App Store Connect zamiast obecnego hasła-z-Keychaina, żeby uniknąć dzisiejszego problemu z zablokowanym ekranem blokującym `altool`).
+
+## 14.09.2026 (ciąg dalszy) — CI/CD Etap 2 domknięty: pierwsze testy zielone na CI, plus zsynchronizowany miesiąc pracy z GitHubem
+
+Kontynuacja PR #1. User: "odrazu" (po wyjaśnieniu czym jest CI/CD/testy/architektura modularna).
+
+**Dodane**: target `PMemoriesAppTests` (Swift Testing, `@testable import PMemories`) — 13 testów dla czystych, bez-SwiftData funkcji: `TravelAchievementsCalculator` (regresja na dzisiejszy bug z Irlandią Północną), `Season`, `SolarTime`.
+
+**Cztery nieudane rundy CI, zanim faktycznie zadziałało — każda z inną, realną przyczyną:**
+1. `TEST_HOST` liczony przez XcodeGen źle (na bazie nazwy TARGETU "PMemoriesApp", nie prawdziwego `PRODUCT_NAME` "PMemories") → jawna ścieżka `$(BUILT_PRODUCTS_DIR)/PMemories.app/PMemories`.
+2. `xcodebuild test` (jedno polecenie) → "has no member 'countryGroupingCode'", mimo że funkcja realnie istnieje. Podejrzewany wyścig w harmonogramowaniu → rozbite na `build-for-testing`/`test-without-building` (i tak lepszy wzorzec CI). Nie pomogło.
+3. Ten sam błąd → podejrzewany stary domyślny Xcode runnera (16.4 vs lokalny 26.6) → jawny wybór `Xcode_26.3.app` (najnowszy dostępny na obrazie). Nie pomogło.
+4. **Prawdziwa przyczyna**, znaleziona dopiero teraz: `git show HEAD:PMemoriesApp/TravelAchievements.swift` pokazał plik z 20.08 (615 linii) BEZ `countryGroupingCode` w ogóle — cała ta funkcja (i cały mechanizm grupowania UK) powstała PO ostatnim commicie. CI budowało appkę sprzed miesiąca, testy sprawdzały funkcje z dzisiejszego, lokalnego, niezacommitowanego stanu. Zero związku z Xcode/wyścigami — to były dwa błędne tropy po drodze.
+
+**Decyzja usera** (po pytaniu A/B): zsynchronizować realny kod z GitHubem. Jeden duży commit — **1202 pliki, +44891/-12766 linii** — cały miesiąc pracy od 20.08: znaczki krajów (215 imagesetów), World Globe, moduł AI Director, grupowanie UK, plakat (dzień/noc, centrowanie średnią, fix lotów), ranking/kręgi znajomych. Świadomie pominięty `PosterKit/` (36MB surowego materiału roboczego, README wprost: "NIE podpięte do Xcode").
+
+**Piąta runda CI** (już na realnym kodzie) złapała **prawdziwy, niezależny bug**: `EditView.swift:83` — `error: the compiler is unable to type-check this expression in reasonable time`. `body` to było jedno ~190-liniowe wyrażenie z 20+ chained modyfikatorami (sheets/alerts/onChange) — kompilowało się lokalnie (szybszy Mac), ale przekraczało limit czasu type-checkera na CPU runnera CI. Dokładnie ten sam, już wcześniej w tym pliku spotykany błąd (patrz komentarz przy `styleModifiers`). Naprawione: rozbite na `coreContent`/`withSheetsAndPickers`/`body` — trzy niezależnie sprawdzane właściwości, zero zmian w logice. Zweryfikowane lokalnie (`build-for-testing`+`test-without-building`, 13/13 zielono) PRZED pushem.
+
+**Szósta runda: ZIELONO.** Build for Testing ✓, Run Tests ✓ (13/13), całość 5m34s.
+
+**Uczciwie**: CI od razu w pierwszym tygodniu złapało dwa realne, niezależne problemy (rozjazd kod↔git, kruchy type-checking `EditView.body`), których nikt by ręcznie nie znalazł — dokładnie po to się to robiło.
+
+PR #1 (`setup-ci-workflow` → `main`) gotowy do scalenia.
