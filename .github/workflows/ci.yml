@@ -32,6 +32,17 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  # 14.09.2026, user: "czy mogę mieć robiony test bugów i błędów codziennie
+  # o 12 PM" — codzienne sprawdzenie `main`, niezależnie od tego czy ktoś
+  # coś pushnął. Zaplanowane triggery (`schedule`) ZAWSZE odpalają się na
+  # gałęzi domyślnej (main), niezależnie gdzie leży ten plik. Cron GitHuba
+  # liczy czas w UTC, nie zna stref czasowych/czasu letniego — 11:00 UTC =
+  # 12:00 w UK w czasie letnim (BST, aktualnie), ale 11:00 w czasie zimowym
+  # (GMT) po przejściu na czas zimowy pod koniec października. Do
+  # poprawienia ręcznie na `0 12 * * *`, jeśli user zauważy że po zmianie
+  # czasu powiadomienie przychodzi o 13:00 zamiast 12:00.
+  schedule:
+    - cron: '0 11 * * *'
 
 jobs:
   build:
@@ -133,7 +144,7 @@ jobs:
           ERRORS=$(grep -h "error:" build.log test.log 2>/dev/null | head -5)
           if [ -z "$ERRORS" ]; then ERRORS="(zobacz pełny log pod linkiem niżej)"; fi
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title }}"
+          COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title || 'Codzienne sprawdzenie (harmonogram)' }}"
           MESSAGE=$(printf '❌ PMemories CI FAILED\nGałąź: %s\nCommit: %s\n\nBłędy:\n%s\n\n%s' "${{ github.ref_name }}" "$COMMIT_MSG" "$ERRORS" "$RUN_URL")
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
@@ -142,7 +153,7 @@ jobs:
       - name: Notify Telegram on success
         if: success()
         run: |
-          COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title }}"
+          COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title || 'Codzienne sprawdzenie (harmonogram)' }}"
           MESSAGE=$(printf '✅ PMemories CI passed\nGałąź: %s\nCommit: %s' "${{ github.ref_name }}" "$COMMIT_MSG")
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
