@@ -35,6 +35,39 @@ enum LeaderboardService {
         case notSignedIn
     }
 
+    /// 15.09.2026 — user zgłosił zrzut ekranu z surowym błędem CloudKit
+    /// wprost w UI ("Error saving record <CKRecordID:...> to server: WRITE
+    /// operation not permitted") — `LeaderboardView` pokazywała
+    /// `error.localizedDescription` bez żadnego tłumaczenia, więc user
+    /// widział techniczny zrzut zamiast zrozumiałego komunikatu.
+    ///
+    /// `.permissionFailure` w TYM konkretnym miejscu (upsert własnego
+    /// wyniku) ma jedną realną przyczynę: rekord o tym `recordName`
+    /// (identyfikator Sign in with Apple) w publicznej bazie CloudKit ma
+    /// zapisanego INNEGO twórcę (`GRANT WRITE TO "_creator"` w schemacie —
+    /// świadomy, prawidłowy wybór bezpieczeństwa: nikt nie powinien móc
+    /// nadpisać cudzego wyniku). Dzieje się to gdy TEN SAM Apple ID posłużył
+    /// do "Sign in with Apple" na urządzeniu/w momencie, gdy faktyczne konto
+    /// iCloud tego urządzenia było inne niż teraz (np. testowanie na
+    /// pożyczonym/współdzielonym urządzeniu, albo zmiana konta iCloud po
+    /// wcześniejszym zalogowaniu) — appka nie ma jak sama tego naprawić
+    /// (nie może przejąć cudzego rekordu), stąd jasny komunikat zamiast
+    /// cichej próby ponowienia, która i tak zawsze zawiedzie z tym samym
+    /// identyfikatorem.
+    static func friendlyMessage(for error: Error) -> String {
+        guard let ckError = error as? CKError else { return error.localizedDescription }
+        switch ckError.code {
+        case .permissionFailure:
+            return L("This score can't be saved under your current Apple ID — it looks like it was already created by a different iCloud account. Contact the developer if this keeps happening.")
+        case .notAuthenticated:
+            return L("Sign in to iCloud in Settings to use the Ranking.")
+        case .networkUnavailable, .networkFailure:
+            return L("No internet connection — try again once you're back online.")
+        default:
+            return error.localizedDescription
+        }
+    }
+
     /// Zapisuje/aktualizuje wynik AKTUALNEGO usera (upsert po stałym ID) —
     /// wołane po każdym przeliczeniu `ExplorerScore` (patrz `AchievementsView`),
     /// nie na jakimś osobnym timerze — zawsze najświeższy stan.

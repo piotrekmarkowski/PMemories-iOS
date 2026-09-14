@@ -250,7 +250,7 @@ struct LeaderboardView: View {
             try auth.handle(result: result)
             await refresh()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = LeaderboardService.friendlyMessage(for: error)
         }
     }
 
@@ -267,7 +267,7 @@ struct LeaderboardView: View {
             entries = try await LeaderboardService.topEntries(sortBy: sortMode)
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = LeaderboardService.friendlyMessage(for: error)
         }
     }
 
