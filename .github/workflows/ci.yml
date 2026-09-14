@@ -145,20 +145,34 @@ jobs:
       # 2/merge" na Telegramie). `head_ref` istnieje tylko dla PR-ów i
       # zawiera prawdziwą nazwę gałęzi źródłowej; dla push/schedule jest
       # puste, więc `|| ref_name` wtedy poprawnie wraca do zwykłej gałęzi.
+      # 15.09.2026 — realny bug znaleziony na PIERWSZYM pushu bezpośrednio na
+      # `main` (squash-merge z PR-a): `github.event.head_commit.message` dla
+      # squasha niesie CAŁY, wieloliniowy opis PR-a (nie samą jedną linię
+      # jak zwykły commit) — wklejony wprost w `${{ }}` string bash
+      # ("COMMIT_MSG=\"...\"") łamał składnię skryptu (dosłowne nowe linie,
+      # cudzysłowy w treści commita). `env:` (nie interpolacja w `run:`)
+      # jest bezpieczne dla dowolnej wieloliniowej/dziwnej treści — GitHub
+      # Actions zapisuje zmienne środowiskowe przez plik, nie przez
+      # podstawianie tekstu w skrypt shella. Dodatkowo i tak ucinamy do
+      # PIERWSZEJ LINII (`head -1`) — cały wieloakapitowy opis commita byłby
+      # nieczytelny w powiadomieniu na telefonie.
       - name: Notify Telegram on failure
         if: failure()
+        env:
+          RAW_COMMIT_MSG: ${{ github.event.head_commit.message || github.event.pull_request.title || 'Codzienne sprawdzenie (harmonogram)' }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           ERRORS=$(grep -h "error:" build.log test.log 2>/dev/null | head -5)
           if [ -z "$ERRORS" ]; then ERRORS="(zobacz pełny log pod linkiem niżej)"; fi
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title || 'Codzienne sprawdzenie (harmonogram)' }}"
-          MESSAGE=$(printf '❌ PMemories CI FAILED\nGałąź: %s\nCommit: %s\n\nBłędy:\n%s\n\n%s' "${{ github.head_ref || github.ref_name }}" "$COMMIT_MSG" "$ERRORS" "$RUN_URL")
+          COMMIT_MSG=$(echo "$RAW_COMMIT_MSG" | head -1)
+          MESSAGE=$(printf '❌ PMemories CI FAILED\nGałąź: %s\nCommit: %s\n\nBłędy:\n%s\n\n%s' "$BRANCH" "$COMMIT_MSG" "$ERRORS" "$RUN_URL")
           # Przycisk "🔧 Napraw" — callback_data niesie run_id, żeby listener
           # na VPS (`telegram-bot/`) wiedział KTÓRY run przekazać dalej do
           # `auto-fix.yml` (workflow_dispatch). Sam button NIE naprawia
           # nic sam z siebie — dopiero jego kliknięcie odpala osobny
           # workflow, patrz komentarz w `auto-fix.yml`.
-          KEYBOARD='{"inline_keyboard":[[{"text":"🔧 Napraw","callback_data":"fix:${{ github.run_id }}"}]]}'
+          KEYBOARD="{\"inline_keyboard\":[[{\"text\":\"🔧 Napraw\",\"callback_data\":\"fix:${{ github.run_id }}\"}]]}"
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=${MESSAGE}" \
@@ -166,9 +180,12 @@ jobs:
 
       - name: Notify Telegram on success
         if: success()
+        env:
+          RAW_COMMIT_MSG: ${{ github.event.head_commit.message || github.event.pull_request.title || 'Codzienne sprawdzenie (harmonogram)' }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title || 'Codzienne sprawdzenie (harmonogram)' }}"
-          MESSAGE=$(printf '✅ PMemories CI passed\nGałąź: %s\nCommit: %s' "${{ github.head_ref || github.ref_name }}" "$COMMIT_MSG")
+          COMMIT_MSG=$(echo "$RAW_COMMIT_MSG" | head -1)
+          MESSAGE=$(printf '✅ PMemories CI passed\nGałąź: %s\nCommit: %s' "$BRANCH" "$COMMIT_MSG")
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=${MESSAGE}" > /dev/null
