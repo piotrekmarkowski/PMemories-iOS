@@ -2465,4 +2465,1214 @@ User: "musimy chyba zrobić build 14 bo ten z sercami poszedł" — build 13 wys
 
 **Zawartość build 14** (jedyna zmiana od build 13): "Want to visit" ❤️→🔖.
 
+## 21.08.2026 — World Globe: mała ikonka w toolbarze zamieniona na segmented control Map/Globe
+
+User na referencyjnym zrzucie z innej appki (segmented control "Map/Trips/Saved" nad mapą): "takie zakładki tam gdzie tworzymy mapę i zamiast globusa... nie będzie wyglądać na ukrytą funkcję". Diagnoza: World Globe (interaktywny globus wszystkich odwiedzonych miejsc, 30.07.2026) był dostępny WYŁĄCZNIE przez malutką ikonkę `globe.desk` w toolbarze `TravelMapView` (obok trofeum) plus osobną ikonkę globusa na karcie "Your Journey" na Home — żadnego widocznego, nazwanego wejścia. Zakres ustalony z userem: 2 zakładki (Map/Globe), NIE 3 — Trips zostaje tam gdzie jest (za ikonką trofeum w `AchievementsView`), nie przenosimy go teraz.
+
+**Zmiana w `TravelMapView.swift`:**
+- Nowy `private enum TravelSegment { case map, globe }`, zastąpił `@State private var isShowingWorldGlobe: Bool`.
+- Nowy `travelSegmentHeader` — wspólny nagłówek nad OBIEMA zakładkami: tytuł "Travel Map" (przeniesiony z pierwszego wiersza `stopsList`, żeby nie dublować się w dwóch miejscach) + `Picker(...).pickerStyle(.segmented)` z opcjami "Map"/"Globe".
+- `WorldGlobeView` **w ogóle nie został zmieniony** — dalej przyjmuje `@Binding var isPresented: Bool` (potrzebne bo sam się zamyka przy skoku do sfilmowanej pamiątki w Library). Zamiast tego dodany computed `worldGlobePresentedBinding` w `TravelMapView`, który tłumaczy `travelSegment` na `Bool` w obie strony — `WorldGlobeView` myśli że dalej jest pushowanym ekranem, w praktyce to teraz zakładka przełączana w miejscu (`switch travelSegment` wewnątrz wspólnego `VStack`, bez `.navigationDestination`).
+- Ikonka `globe.desk` USUNIĘTA z `travelMapToolbar` (zostało tylko trofeum). Deep-link z Home ("Your Journey" → globus) dalej działa, tylko zamiast `isShowingWorldGlobe = true` ustawia `travelSegment = .globe`.
+
+**Lokalizacja** — dwa nowe klucze ("Map", "Globe") dodane do `Localizable.xcstrings` z tłumaczeniami na wszystkich 27 języków od razu (nie odłożone na później, zgodnie z ustaloną zasadą) — jakość tłumaczeń AI bez native-speaker review, jak reszta katalogu.
+
+Build → **BUILD SUCCEEDED** (`xcodebuild`, potwierdzone realnie — SourceKit w edytorze pokazywał fałszywe błędy "Cannot find type" na świeżo edytowanym pliku, znany szum tego środowiska, zignorowane). Zainstalowane na telefonie usera ("Pit", iPhone 16 Pro) przez `devicectl` i uruchomione — **wizualne potwierdzenie na urządzeniu jeszcze czeka na usera** (nie mam tu narzędzia do zdalnego sterowania/zrzutów ekranu z fizycznego iPhone'a, w odróżnieniu od emulatora Androida).
+
+**How to apply:** jeśli user zgłosi że coś w Travel wygląda inaczej niż oczekiwał (np. tytuł "Your Places" pojawiający się w pasku nawigacji przy zakładce Globe — to `WorldGlobeView.navigationTitle`, świadomie zostawione bez zmian, nie bug), to punkt wyjścia do poprawek jest w `travelSegmentHeader`/`navigationContent`, nie w `WorldGlobeView.swift`.
+
+**Wizualne potwierdzenie na urządzeniu**: user, od razu po zainstalowaniu na "Pit" (iPhone 16 Pro) — "super wydaje mi się to dużo lepszym wyjściem".
+
+## 22-23.08.2026 — domyślne tło (bez skórki) dostało chmury zamiast płaskiej bieli
+
+User zauważył na zrzutach porównawczych Library/Trip Planning (ze skórką vs bez): "bez skórki jest strasznie jednolite tło, nie widać chmurek". Sprawdzone w kodzie: `TabSkinBackground.swift` — `if let skin = ..., let assetName = ...` renderowało realne skórki, ale nie miało w ogóle gałęzi `else` — przy `AppSkin.none` `.background {}` był całkowicie pusty, więc ekran spadał na zwykłe systemowe białe tło. Zero tekstury, zero gradientu.
+
+**Próba 1 (odrzucona)**: proceduralne chmury przez rozmyte elipsy z alpha w PIL — wynik wyglądał jak plamy/ameby z szarą obwódką (artefakt rozmycia kanału alpha), nie chmury. Nie wysłane do wdrożenia.
+
+**Próba 2 (zaakceptowana)**: inna technika — każda "chmurka" to seria zagnieżdżonych elips o malejącym rozmiarze i rosnącej nieprzezroczystości (radialny gradient bez twardej krawędzi do rozmywania), dopiero na końcu lekki blur całej warstwy. Rezultat: czyste, miękkie, jasne niebo z chmurami, bez artefaktów. User: "spoko" po obejrzeniu w Podglądzie.
+
+**Wdrożenie**:
+- Nowy asset `Assets.xcassets/DefaultClouds.imageset/default_clouds.png` (750×1334, wygenerowany proceduralnie, nie zdjęcie — świadoma decyzja: żadna z istniejących skórek nie ma neutralnego dziennego nieba do przycięcia, wszystkie są w tonacji zachodu/zmierzchu, więc crop wyglądałby jak urwana wersja czyjejś skórki, nie neutralny domyślny stan).
+- `TabSkinBackground.swift` — dodana gałąź `else` renderująca `Image("DefaultClouds")`, ŚWIADOMIE bez ciemnej nakładki 0.18 jak przy realnych skórkach (obrazek już jest jasny/pastelowy z założenia, dociemnienie zrobiłoby szarą mgłę).
+- `skinAwareHeading()` NIE wymagał zmian — `.none` dalej liczy się jako "brak aktywnej skórki", tekst zostaje `.primary` (czarny), co jest poprawne na tak jasnym tle.
+- Efekt widoczny jednocześnie na WSZYSTKICH ekranach korzystających z `.tabSkinBackground()` (Home/Studio/Travel/Library/Templates/Trip Planning) — jeden wspólny modyfikator, zero zmian per-ekran.
+
+Build → **BUILD SUCCEEDED**, zainstalowane na "Pit" (iPhone 16 Pro) przez `devicectl`. Wizualne potwierdzenie na żywym urządzeniu — do zrobienia przez usera.
+
+## 23.08.2026, ciąg dalszy — build 16 (1.0.2) wysłany
+
+User: "wrzućmy build 16" — `CFBundleVersion` 15→16 (`CFBundleShortVersionString` zostaje "1.0.2"). Sprawdzony proces: `xcodegen generate` → `xcodebuild archive` (Release, `build/PMemories_build16.xcarchive`) → `xcodebuild -exportArchive` (`build/ExportOptions.plist`) → `xcrun altool --upload-app`, hasło z Keychain (`PMemoriesUpload`). Zero przeszkód tym razem (nazwa `.ipa` sprawdzona przez `ls` przed użyciem, nie zgadywana jak przy build 15). **UPLOAD SUCCEEDED**, 14.4MB w 1.3s, Delivery UUID `4af6df8f-bbca-4f69-b7e2-d05a8f05c56c`.
+
+**Zawartość build 16**: domyślne tło (bez wybranej skórki) dostało subtelne chmury zamiast płaskiej bieli (patrz wpis wyżej) — jedyna zmiana od build 15. Czeka na przetworzenie przez Apple / recenzję TestFlight.
+
+## 21.08.2026, ciąg dalszy — build 15 (1.0.2) wysłany
+
+User: "teraz wrzućmy build 15" — `CFBundleVersion` 14→15 (`project.yml`, `CFBundleShortVersionString` zostaje "1.0.2"). Sprawdzony proces: `xcodegen generate` → `xcodebuild archive` (Release, `build/PMemories_build15.xcarchive`) → `xcodebuild -exportArchive` (ten sam `build/ExportOptions.plist` co poprzednie buildy) → `xcrun altool --upload-app`, hasło z Keychain (`PMemoriesUpload`).
+
+Jedna drobna przeszkoda: pierwsza próba `altool` wskazała zły plik (`PMemoriesApp.ipa` zamiast faktycznej nazwy `PMemories.ipa` w `build/export15/`) — poprawione, druga próba zadziałała. **UPLOAD SUCCEEDED**, 14.4MB w 28.6s, Delivery UUID `55f98132-9943-48f3-a6c1-0162000c6c8d`.
+
+**Zawartość build 15**: segmented control Map/Globe w Travel Map (patrz wpis wyżej) — jedyna zmiana od build 14. Czeka na przetworzenie przez Apple / recenzję TestFlight.
+
 Czeka na przetworzenie przez Apple / recenzję TestFlight.
+
+## 23.08.2026, ciąg dalszy — DRUGI realny bug report testerki: "Export failed / Operation Stopped" — diagnoza + dwie poprawki
+
+User przekazał zrzut ekranu od znajomej testującej appkę przez TestFlight — dokładnie ten sam alert co 10.08.2026 ("Export failed" / "Operation Stopped"), tym razem w trakcie otwierania ZAPISANEGO projektu do edycji (nie tworzenia nowego). User: "to się nie może wydarzyć jak wypuszczę appkę, to realny błąd".
+
+**Diagnoza (przegląd kodu, nie zgadywanie)**:
+- "Operation Stopped" to SUROWY `error.localizedDescription` z AVFoundation — `EditView.performExport`'s catch pokazuje go 1:1, chyba że appka wykryje że powodem było zejście appki z pierwszego planu w trakcie eksportu (fix z 10.08, patrz wyżej). Skoro user zobaczył surowy tekst, a nie przyjazną wersję — TO NIE był ten już-załatany scenariusz.
+- Znaleziona realna, potwierdzona luka: `HomeView.openProject(_:)` (otwieranie zapisanego projektu do edycji — dokładnie scenariusz ze zrzutu) ściąga wideo/Live Photo z iCloud przez `MediaAssetLoader.loadMediaItems`, ale w PRZECIWIEŃSTWIE do bliźniaczych `loadSelection`/`EditView.addMore` (które dostały ten fix 10.08.2026, patrz wpis wyżej) NIE trzymało `isIdleTimerDisabled` w trakcie tego pobierania. Jeśli ekran zgasł podczas ściągania z iCloud, appka cicho gubi klipy (błędy `PHAssetResourceManager` połknięte przez `try?` gdzie indziej w kodzie) — landmina która wybucha później jako błąd eksportu.
+- Drugi, głębszy problem: appka nigdzie nie loguje prawdziwego kodu błędu AVFoundation (domain/code) — po zamknięciu alertu znika bezpowrotnie, więc bez logów z telefonu testera nie da się ze 100% pewnością potwierdzić DOKŁADNEJ przyczyny tego konkretnego zgłoszenia.
+
+**Naprawione**:
+1. `HomeView.openProject` — dopisane `UIApplication.shared.isIdleTimerDisabled = true` + `defer` przywracające `false`, ten sam wzorzec co `loadSelection`.
+2. `EditView.performExport`'s catch — gdy błąd NIE jest znanym scenariuszem "zejście z pierwszego planu", komunikat teraz dopisuje surowy `NSError` domain/code (`"\(error.localizedDescription) [\(nsError.domain) \(nsError.code)]"`) — ten sam wzorzec diagnostyczny co `TravelMapVideoRenderer.lastProfileSummary` (testerzy nie mają konsoli Xcode, więc sam zrzut ekranu z alertem musi wystarczyć). Przy TRZECIM takim zgłoszeniu będzie już konkretny kod błędu do dalszej diagnozy, zamiast zgadywania.
+
+Build → **BUILD SUCCEEDED**, zainstalowane na "Pit" (jedna przejściowa blokada tunelu `devicectl` przy pierwszej próbie, druga zadziałała — znany, nieszkodliwy wzorzec z poprzednich sesji).
+
+## 23.08.2026, ciąg dalszy — build 17 (1.0.2) wysłany
+
+User: "jak to się naprawi robimy build 17" — `CFBundleVersion` 16→17 (`CFBundleShortVersionString` zostaje "1.0.2"). Sprawdzony proces: `xcodegen generate` → `xcodebuild archive` (Release, `build/PMemories_build17.xcarchive`) → `xcodebuild -exportArchive` (`build/ExportOptions.plist`) → `xcrun altool --upload-app`, hasło z Keychain (`PMemoriesUpload`). Zero przeszkód (nazwa `.ipa` sprawdzona przez `ls` przed użyciem). **UPLOAD SUCCEEDED**, 14.4MB w 3.1s, Delivery UUID `151931a3-eb3d-440e-a738-2195ec910cf2`.
+
+**Zawartość build 17**: dwie poprawki niezawodności eksportu z wpisu wyżej — `isIdleTimerDisabled` dopisany do `HomeView.openProject` (brakująca ochrona przy ściąganiu z iCloud podczas otwierania zapisanego projektu), i dopisanie surowego `NSError` domain/code do komunikatu "Export failed" gdy przyczyna nie jest znanym scenariuszem zejścia z pierwszego planu. Jedyne zmiany od build 16. Czeka na przetworzenie przez Apple / recenzję TestFlight.
+
+## 23.08.2026, ciąg dalszy — TRZECI realny bug report tej samej testerki: teraz z konkretnym kodem błędu (`AVFoundationErrorDomain -11838`) — dwie poprawki
+
+Ta sama znajoma, ten sam alert "Export failed / Operation Stopped", ale teraz — dzięki logowaniu dodanemu w build 17 — z dopisanym kodem `[AVFoundationErrorDomain -11838]`. Potwierdza to że fix logowania z build 17 działa zgodnie z projektem: przy powtórce tego samego błędu dostaliśmy realny trop zamiast zgadywania. User: "zrób to co trzeba żeby wyeliminować ten błąd, nie chcę żeby się powtarzał".
+
+**Diagnoza** — sprawdzone przez wyszukanie dokumentacji Apple Developer Forums (nie zgadywane): `-11838` = "The operation is not supported for this media", typowe przyczyny: (a) assety iCloud nie w pełni pobrane, (b) niezgodność formatu/kodeka przy mieszaniu klipów w jednej kompozycji (np. HDR/ProRes + SDR/HEVC).
+
+Sprawdzone w kodzie: `MediaAssetLoader.swift`/`LivePhotoVideoExtractor.swift` już poprawnie używają `isNetworkAccessAllowed = true` z propagacją błędu przez `try await` — więc (a) samo w sobie mało prawdopodobne jako JEDYNA przyczyna (prawdziwy błąd sieci dałby inny kod, nie akurat `-11838` na etapie eksportu). Bardziej prawdopodobne (b): appka ZAWSZE dokleja kartę outro renderowaną jako ProRes422HQ (`PMemoriesOutroCardRenderer`/`ImageToVideoRenderer`) obok prawdziwego wideo usera (HEVC, czasem HDR na nowszych iPhone'ach) w jednej `AVAssetExportSession` — udokumentowany trigger dokładnie tego kodu błędu. Bez 100% pewności co do jedynej przyczyny, zaimplementowane OBIE poprawki naraz zamiast obstawiać jedną teorię:
+
+**Naprawione**:
+1. `VideoComposer.swift` — wymuszona jedna, stała przestrzeń kolorów (SDR Rec.709: `AVVideoColorPrimaries_ITU_R_709_2` / `AVVideoYCbCrMatrix_ITU_R_709_2` / `AVVideoTransferFunction_ITU_R_709_2`) na całej `AVMutableVideoComposition`, zamiast liczyć na to że AVFoundation sam dobrze wywnioskuje wspólny format z mieszanki ProRes+HEVC/HDR (tone-mapping HDR→SDR wliczony).
+2. `MediaAssetLoader.swift` — nowa `static func validatePlayableVideo(at:)`: po udanym `writeData` sprawdza że plik ma poprawny `duration` i realny track wideo, zanim trafi dalej do kompozycji — `writeData` bez błędu NIE gwarantuje kompletnego pliku (np. przerwane pobieranie z iCloud mogło zostawić okrojony plik, który wcześniej szedł prosto do eksportu i dawał dopiero tam kryptyczny błąd). Ta sama walidacja dopisana też do `LivePhotoVideoExtractor.pairedVideoURL` (identyczna ścieżka iCloud→kompozycja dla Live Photo).
+
+Build → **BUILD SUCCEEDED** (`xcodebuild`, Debug). SourceKit pokazał fałszywe "No such module 'UIKit'" / "Cannot find 'MediaAssetLoader' in scope" na obu edytowanych plikach — znany szum tego środowiska, zignorowane, `xcodebuild` jest jedynym źródłem prawdy.
+
+## 23.08.2026, ciąg dalszy — build 18 (1.0.2) wysłany
+
+User: "i wrzuć to pod build 18" — `CFBundleVersion` 17→18 (`CFBundleShortVersionString` zostaje "1.0.2"). Sprawdzony proces: `xcodegen generate` → `xcodebuild archive` (Release, `build/PMemories_build18.xcarchive`) → `xcodebuild -exportArchive` (`build/ExportOptions.plist` → `build/export18/`) → nazwa `.ipa` sprawdzona przez `ls` przed użyciem (`PMemories.ipa`) → `xcrun altool --upload-app`, hasło z Keychain (`PMemoriesUpload`). Zero przeszkód. **UPLOAD SUCCEEDED**, 14.4MB w 6.3s, Delivery UUID `7a13368b-f909-4ecf-ab1c-71f72334325d`.
+
+**Zawartość build 18**: obie poprawki błędu eksportu `AVFoundationErrorDomain -11838` z wpisu wyżej — wymuszona jedna przestrzeń kolorów (SDR Rec.709) na `AVMutableVideoComposition` w `VideoComposer.swift`, oraz walidacja kompletności pobranego pliku wideo (`MediaAssetLoader.validatePlayableVideo`) po `writeData`, zarówno dla zwykłych klipów jak i Live Photo. Jedyne zmiany od build 17. Czeka na przetworzenie przez Apple / recenzję TestFlight.
+
+## 23.08.2026, ciąg dalszy — CZWARTY raport tego samego bugu eksportu + osobny bug w Trip Planning (Gatwick bez pinezki)
+
+**Eksport `-11838`, runda 4**: ta sama znajoma, ten sam projekt (5 zwykłych zdjęć tego samego dziecka, bez wideo). User potwierdził: błąd wraca NIEZALEŻNIE od wybranego filtra Style i od jakości eksportu — to wyklucza `ColorGrader` (pomijany całkowicie gdy brak filtra) i `canvasSize`/rozdzielczość jako jedyną przyczynę. Oznacza to że dwie poprawki z build 18 (przestrzeń kolorów w głównej kompozycji, walidacja plików z iCloud) NIE trafiły w prawdziwe źródło — obie dotyczyły ścieżek, które w tym konkretnym przypadku (same zdjęcia, ten sam filtr/jakość niezależnie) nie są jedynym wspólnym mianownikiem.
+
+Zamiast zgadywać PIĄTą z rzędu poprawkę bez twardych danych: `EditView.performExport` dostał etykietowanie etapów (`ExportStageError` + helper `stage(_:_:)`) opakowujące `buildComposition`/`VideoExporter.export`/`ColorGrader.apply`/`saveToPhotos` osobno — komunikat błędu pokazuje teraz DOKŁADNIE która faza zawiodła (np. `[mainExport: AVFoundationErrorDomain -11838]`) zamiast tylko surowego kodu bez kontekstu. Przy kolejnym zgłoszeniu będzie wiadomo gdzie dokładnie szukać, zamiast zgadywać po raz kolejny.
+
+**Trip Planning — Gatwick bez pinezki/linii na mapie**: user przesłał zrzut podróży "Fuerteventura" znajomej — punkt startowy "Gatwick" nie miał żadnej pinezki ani linii na `RouteMapCard`, tylko cel ("Airport Fuerteventura") był widoczny. Zdiagnozowane w `TripPlanningView.swift`: to zamierzone zachowanie z 11.08.2026 (`stop.coordinate` ustawia WYŁĄCZNIE `select(_:)` po kliknięciu podpowiedzi z listy — samo wpisanie tekstu bez wyboru zeruje współrzędne, świadomie "zero zgadywania"), ale appka nie dawała ŻADNEGO sygnału że coś nie zostało zatwierdzone — znajoma najwyraźniej wpisała "Gatwick" i nie kliknęła podpowiedzi.
+
+**Naprawione**:
+1. Nowy `unresolvedLocationHint` w `PlannedStopRow` — gdy pole straciło fokus, ma wpisany tekst, ale `stop.coordinate == nil`, appka pokazuje pomarańczowe ostrzeżenie: "Tap a suggestion from the list so this place appears on the map" (przetłumaczone na wszystkie 27 języków od razu, `Localizable.xcstrings`).
+2. `.onChange(of: isFocused)` na polu miasta czyści `completer.results` przy odejściu z pola bez wyboru — bez tego stare podpowiedzi mogły zostać widoczne równolegle z nowym ostrzeżeniem.
+
+Build → **BUILD SUCCEEDED**, zainstalowane na "Pit". Diagnostyka eksportu jest świadomie NIEGWARANTOWANĄ naprawą (user o tym poinformowany) — czeka na kolejny realny raport ze szczegółową lokalizacją błędu.
+
+## 23.08.2026, ciąg dalszy — build 19 (1.0.2) wysłany
+
+User: "dodaj ostrzeżenie i wyślij jako build 19" — `CFBundleVersion` 18→19 (`CFBundleShortVersionString` zostaje "1.0.2"). Sprawdzony proces: `xcodegen generate` → `xcodebuild archive` (Release, `build/PMemories_build19.xcarchive`) → `xcodebuild -exportArchive` → nazwa `.ipa` sprawdzona przez `ls` (`PMemories.ipa`) → `xcrun altool --upload-app`. **UPLOAD SUCCEEDED**, 14.4MB w 2.0s, Delivery UUID `55bdd6a3-e5ea-461e-b2cc-4da46dd82385`.
+
+**Zawartość build 19**: (1) etykietowanie faz eksportu (`ExportStageError`) — przy kolejnym `-11838` komunikat pokaże DOKŁADNIE która faza zawiodła, diagnostyka nie gwarantowana naprawa; (2) widoczne ostrzeżenie w Trip Planning gdy wpisane miasto/lotnisko nie zostało zatwierdzone z listy podpowiedzi (bug "Gatwick bez pinezki"). Jedyne zmiany od build 18. Czeka na przetworzenie przez Apple / recenzję TestFlight.
+
+## 23.08.2026, ciąg dalszy — diagnostyka build 19 zadziałała: `-11838` faktycznie w `mainExport`, plus dwa dodatkowe znaleziska
+
+Znajoma spróbowała ponownie na build 19 — komunikat pokazał **`[mainExport: AVFoundationErrorDomain -11838]`**, potwierdzając że pada w `VideoExporter.export` (główny, pierwszy przebieg), NIE w `ColorGrader` ani `saveToPhotos` — zgodne z wcześniejszą obserwacją usera że błąd nie zależy od filtra/jakości.
+
+**Dodatkowy realny problem zgłoszony przy okazji**: zrzut z zakładki Studio pokazał kilka zdublowanych projektów z tymi samymi 5 zdjęciami (kolejne nieudane próby eksportu tego samego materiału tworzyły nowe projekty zamiast kontynuować istniejący) — a `StudioProjectRow` (`HomeView.swift`) był zwykłym `Button`, bez JAKIEJKOLWIEK opcji usunięcia. Usuwanie istniało już w `LibraryView` (swipe actions), ale to inna zakładka — user nie ma powodu wiedzieć że to te same dane. **Naprawione**: widoczna ikonka kosza na każdym wierszu w "Recent Projects" + `confirmationDialog` przed usunięciem (nie ukryty swipe — ta lista żyje w `ScrollView`/`VStack`, nie w `List`, więc `.swipeActions` i tak by tu nie zadziałało; a widoczna ikonka pasuje do zasady "widoczne, nazwane kontrolki" ustalonej przy World Globe).
+
+**Wzbogacona diagnostyka błędu eksportu**: nowy `describeErrorChain(_:)` w `EditView.swift` schodzi przez `NSUnderlyingErrorKey` (do 5 poziomów w głąb) i dokleja `localizedFailureReason` gdy dostępny — `AVAssetExportSession` czasem chowa bardziej konkretną przyczynę POD samym `-11838`, którego samo domain/code nie ujawnia. Zastąpiło poprzednie proste "domain code".
+
+Nowy klucz lokalizacji "Delete this project?" dodany do wszystkich 27 języków ("Delete"/"Cancel" już istniały w katalogu).
+
+Build → **BUILD SUCCEEDED**, zainstalowane na "Pit".
+
+**Dopisane po pytaniu usera** ("czy możesz oczyścić jeśli ktoś tak jak moja koleżanka miała problem z tym?"): nowa `cleanupEmptyProjects()` w `HomeView.swift`, odpalana raz przy starcie appki (`.task` na widoku który żyje przez cały czas życia appki) — kasuje WYŁĄCZNIE projekty które nigdy nie miały żadnej treści (`items.isEmpty`) I nigdy nie zostały wyeksportowane (`exportedAssetIdentifier == nil`). Świadomie NIE rusza zdublowanych projektów z realną treścią (np. te same 5 zdjęć powtórzone kilka razy po nieudanych eksportach) — appka nie ma jak wiedzieć która kopia jest "tą właściwą", do tego służy ręczna ikonka kosza. Dzięki temu znajoma (i każdy kto już ma podobny bałagan) dostanie automatyczne posprzątanie pustych wpisów od razu po aktualizacji, bez ręcznego kasowania.
+
+Build → **BUILD SUCCEEDED** (ponownie, z auto-cleanup), zainstalowane na "Pit".
+
+## 23.08.2026, ciąg dalszy — build 21 (1.0.2) wysłany
+
+`CFBundleVersion` 20→21 (`CFBundleShortVersionString` zostaje "1.0.2"). Sprawdzony proces: `xcodegen generate` → `xcodebuild archive` (Release, `build/PMemories_build21.xcarchive`) → `xcodebuild -exportArchive` → nazwa `.ipa` sprawdzona przez `ls` (`PMemories.ipa`) → `xcrun altool --upload-app`. **UPLOAD SUCCEEDED**, 13.8MB w 2.0s, Delivery UUID `2b06e394-b4f8-48c1-bb2d-e2cb8d0bee96`.
+
+**Zawartość build 21**: `ImageToVideoRenderer` zmieniony z ProRes422HQ na HEVC dla pliku pośredniego — najsilniejsza dotąd hipoteza na `AVFoundationErrorDomain -11838 ← NSOSStatusErrorDomain -16976` (niejednolite wsparcie dekodowania ProRes między modelami iPhone'a). Jedyna zmiana od build 20. Czeka na przetworzenie przez Apple / recenzję TestFlight — decydujący test: czy znajoma da radę wyeksportować te same 5 zdjęć na tym buildzie.
+
+## 23.08.2026, ciąg dalszy — SESJA NA ŻYWO z podłączonym telefonem: SZEŚĆ poprawek, ŻADNA nie zadziałała. NIE wysłano build 22.
+
+User podłączył kablem NAJPIERW telefon narzeczonej, POTEM (po jej odłączeniu) własny "Pit" — bezpośredni dostęp przez `devicectl`/`idevicesyslog` (Tryb Deweloperski włączony na obu, urządzenie narzeczonej dodatkowo ZAREJESTROWANE w koncie deweloperskim przez Xcode ▶️, bo profil provisioningu wcześniej go nie obejmował). Realny, żywy log systemowy (nie zrzuty ekranu) pozwolił zobaczyć DOKŁADNY wewnętrzny przebieg awarii, nie tylko kod błędu.
+
+**Kluczowe znalezisko z logów**: błąd pada NATYCHMIAST (~2-4ms) wewnątrz prywatnego `FigAssetExportSession` Apple'a, dokładnie w `figAssetExportSession_createRemakerAndBeginExport` → `signalled err=-16976 at <>:8478` → `AVLocalizedErrorWithUnderlyingOSStatus: (AVFoundationErrorDomain / -11838) status (-16976)`. To NIE jest błąd w trakcie przetwarzania próbek (wykluczyło to wcześniejsze teorie o wyczerpaniu zasobów enkodera/DRM audio w trakcie eksportu) — pada zanim COKOLWIEK zostanie przeczytane, przy samym tworzeniu "remakera".
+
+**Poprawki wypróbowane NA ŻYWO na urządzeniu, w kolejności — WSZYSTKIE nieskuteczne**:
+1. `maxConcurrent` 4→1 w `resolveSourceURLs` (teoria: wyczerpanie sesji sprzętowego enkodera HEVC) — bez zmiany.
+2. Preset eksportu `HighestQuality`→`HEVCHighestQuality` w `VideoExporter.export` — identyczny błąd, ten sam kod linii `8478`.
+3. `kCVPixelBufferIOSurfacePropertiesKey` dodane do buforów w `ImageToVideoRenderer` (teoria: "PERFORMANCE WARNING: non-IOSurface backed CVPixelBuffer" widoczne w logach) — bez zmiany.
+4. Test kontrolny: TEN SAM scenariusz (kilka zdjęć, bez muzyki) na URZĄDZENIU USERA ("Pit", iOS 27.0 developer beta) — **zadziałał poprawnie**, podczas gdy identyczny build padał na telefonie narzeczonej (iOS 26.6) → sugerowało to bug specyficzny dla iOS 26.6, już naprawiony w 27.0.
+5. **Obalone póżniej**: cicha ścieżka audio (`ensureAudioTrackExists`/`makeSilentAudioFile` w `VideoComposer.swift`) dodana jako awaryjna ścieżka gdy kompozycja nie ma ŻADNEGO audio — user sam zauważył że jego WCZEŚNIEJSZE udane, długie projekty ZAWSZE miały muzykę, a wszystkie nieudane NIGDY. Zainstalowane na "Pit" (build z tą poprawką) — **PADŁO PONOWNIE, na TYM SAMYM telefonie/iOS 27.0, na którym wcześniej (bez tej poprawki) działało**. To obala JEDNOCZEŚNIE teorię "brak audio" I teorię "specyficzne dla iOS 26.6" — skoro pada teraz też na iOS 27.0.
+
+**Nowa, niezbadana obserwacja**: tester tym razem użył zrzutów ekranu/grafik promocyjnych PMemories (nie zwykłych zdjęć z aparatu) jako materiału — możliwe że screenshoty (inny profil kolorów/format niż JPEG/HEIC z aparatu) to osobna, nieprzebadana jeszcze zmienna.
+
+**Stan na koniec sesji**: build 22 (z poprawką audio) NIE WYSŁANY — user wprost: "nawet nie próbuj wysyłać czegoś z błędem na build 22". Sześć poprawek w `VideoComposer.swift`/`VideoExporter.swift`/`ImageToVideoRenderer.swift` zostaje W KODZIE (nieszkodliwe, część to i tak dobre praktyki — IOSurface, cicha ścieżka audio), ale ŻADNA nie jest potwierdzoną naprawą. User kończy sesję ("idę spać, jutro wznowimy") bez decyzji czy budować pełny ręczny potok `AVAssetReader`/`AVAssetWriter` (jedyna droga która na pewno ominie wadliwy prywatny kod Apple'a, niezależnie od dokładnej przyczyny) — to pytanie czeka na jutro.
+
+**Do zrobienia jutro**: (1) zdecydować czy warto zbudować ręczny reader/writer pipeline zamiast `AVAssetExportSession` dla `mainExport`; (2) zbadać hipotezę "screenshoty jako materiał" jeśli user chce kontynuować diagnozę zamiast razu przechodzić na reader/writer; (3) NIE wysyłać żadnego builda dopóki błąd nie zniknie na urządzeniu które go realnie łapało.
+
+## 24.08.2026 — ROZWIĄZANE: prawdziwa przyczyna znaleziona i potwierdzona na żywo
+
+Kontynuacja sesji z 23.08. Dwa kroki dziś rano:
+
+**Krok 1 — naprawiona sama diagnostyka.** Pierwsza wersja `logCompositionDiagnostics` (dodana w `EditView.swift`) używała zwykłego `print()` — okazało się że `print()` idzie na surowy stdout procesu i NIE trafia do zunifikowanego logowania systemowego bez podłączonego Xcode, więc `idevicesyslog` w ogóle go nie widział (potwierdzone: żadnego śladu mimo potwierdzonej awarii w tym samym momencie). Poprawione na `os.Logger` z `privacy: .public` na każdej interpolowanej wartości (domyślnie os_log chowa je jako `<private>`).
+
+**Krok 2 — pełny zrzut struktury kompozycji ujawnił prawdziwą przyczynę.** Log pokazał: `audio tracks: 2`, obie z `segments=[]` (zupełnie puste). Sprawdzone w kodzie (`VideoComposer.swift:127-128`): `originalAudioTrackA`/`originalAudioTrackB` są tworzone BEZWARUNKOWO na początku `buildComposition`, niezależnie czy jakikolwiek item ma własny dźwięk. Dla projektu z samych zdjęć (bez muzyki, bez realnego wideo z dźwiękiem) obie zostają zupełnie puste — i NIGDY nie są usuwane z kompozycji. To dokładnie ta anomalia (ścieżka audio bez ŻADNEJ treści, nie "brak ścieżki audio" jak błędnie założono wczoraj) myliła prywatny `FigAssetExportSession` Apple'a. To też wyjaśnia czemu wczorajsza poprawka #6 (cicha ścieżka, `guard tracks(.audio).isEmpty`) nigdy się nie uruchamiała — te dwie puste ścieżki ZAWSZE tam były, więc `.isEmpty` (sprawdzające ISTNIENIE, nie TREŚĆ) było zawsze `false`.
+
+**Naprawione**: przed sprawdzeniem/dodaniem cichej ścieżki, appka usuwa z kompozycji każdą ścieżkę audio z zerem segmentów (`composition.removeTrack(track)` dla `track.segments.isEmpty`). Dopiero POTEM `ensureAudioTrackExists` poprawnie wykrywa "brak treści audio" i dokleja ciszę.
+
+**Potwierdzone na żywo na urządzeniu ("Pit")**: przed poprawką — `audio tracks: 2`, obie puste, eksport pada. Po poprawce — `audio tracks: 1`, `segments=[target[0.0..<19.6]]` (realna cisza na całą długość), **eksport zakończony sukcesem, user: "zapisało się"**.
+
+Sesja z 23.08 błędnie zakładała że problem to "zero ścieżek audio" (stąd 6 nieskutecznych poprawek) — prawdziwa przyczyna to "puste, ale ISTNIEJĄCE ścieżki audio", widoczna dopiero dzięki pełnemu zrzutowi struktury kompozycji, nie zgadywaniu pojedynczych zmiennych. Lekcja: przy tej klasie błędów (natychmiastowa, bezobjawowa awaria `AVAssetExportSession`) zrzut PEŁNEJ struktury kompozycji (liczba ścieżek, ich segmenty, instrukcje) jest nieporównywalnie bardziej wartościowy niż punktowe poprawki po jednej zmiennej.
+
+**Dodatkowa zmiana tego samego dnia**: user, po naprawie exportu, wrócił do wczorajszej uwagi ("kosz zawsze widoczny wygląda jak przez przypadek można kliknąć") — poprosił o przesuwanie zamiast stałej ikonki, jak w reszcie appki. `HomeView.studioTab` (sekcja "Recent Projects") przebudowana z `ScrollView`/`VStack` na prawdziwy `List` (ten sam wzorzec stylowania co `LibraryView.projectsList`: `.listRowSeparator(.hidden)`/`.listRowBackground(.clear)`/`.listRowInsets` na każdym wierszu + `.scrollContentBackground(.hidden)` na całości) — dopiero to umożliwiło prawdziwe `.swipeActions`. `StudioProjectRow` uproszczony z powrotem (bez wbudowanej ikonki kosza, `onDelete` przeniesione na `.swipeActions` przy wywołaniu). Zweryfikowane na żywo na "Pit" — działa.
+
+## 24.08.2026, ciąg dalszy — build 22 (1.0.2) wysłany
+
+`CFBundleVersion` 21→22 (`CFBundleShortVersionString` zostaje "1.0.2"). Sprawdzony proces: `xcodegen generate` → `xcodebuild archive` (Release, `build/PMemories_build22.xcarchive`) → `xcodebuild -exportArchive` → nazwa `.ipa` sprawdzona przez `ls` (`PMemories.ipa`) → `xcrun altool --upload-app`. **UPLOAD SUCCEEDED**, 13.8MB w 3.5s, Delivery UUID `899acfc0-a151-422a-8fbf-90c13d6f0e3f`.
+
+**Zawartość build 22**: (1) POTWIERDZONA NAPRAWA błędu eksportu `-11838`/`-16976` (usuwanie pustych ścieżek audio z kompozycji przed sprawdzeniem/dodaniem cichej ścieżki awaryjnej) — pierwszy raz zweryfikowana na żywo na realnie failującym urządzeniu, nie tylko teoretycznie; (2) diagnostyka eksportu przepisana z `print()` na `os.Logger` (poprzednia wersja nie zostawiała śladu w logach bez podłączonego Xcode); (3) usuwanie projektów w Studio przez przesunięcie (`.swipeActions`) zamiast stałej ikonki kosza — `HomeView.studioTab` przebudowany na `List`. Czeka na przetworzenie przez Apple / recenzję TestFlight.
+
+## 23.08.2026, ciąg dalszy — build 20 (1.0.2) wysłany
+
+`CFBundleVersion` 19→20 (`CFBundleShortVersionString` zostaje "1.0.2"). Sprawdzony proces: `xcodegen generate` → `xcodebuild archive` (Release, `build/PMemories_build20.xcarchive`) → `xcodebuild -exportArchive` → nazwa `.ipa` sprawdzona przez `ls` (`PMemories.ipa`) → `xcrun altool --upload-app`. **UPLOAD SUCCEEDED**, 13.8MB w 1.8s, Delivery UUID `e92be1ef-a2d5-440f-8b37-77eb9fe95dc8`.
+
+**Zawartość build 20**: (1) widoczna ikonka kosza + potwierdzenie do usuwania projektów w Studio "Recent Projects"; (2) automatyczne czyszczenie pustych ("0 clips", nigdy niewyeksportowanych) projektów przy starcie appki — naprawia bałagan u osób które już go mają, bez ręcznej interwencji; (3) wzbogacona diagnostyka `-11838` (pełny łańcuch `NSUnderlyingErrorKey` + `localizedFailureReason`), po tym jak build 19 potwierdził że pada w fazie `mainExport`. Jedyne zmiany od build 19. Czeka na przetworzenie przez Apple / recenzję TestFlight.
+
+## 23.08.2026, ciąg dalszy — build 20 daje NAJBARDZIEJ konkretny trop dotąd: prawdopodobne źródło znalezione (ProRes → HEVC)
+
+Znajoma spróbowała ponownie na build 20 (z pełnym łańcuchem błędów). Komunikat: **`[mainExport: AVFoundationErrorDomain -11838 (The operation is not supported for this media.) ← NSOSStatusErrorDomain -16976]`**.
+
+Wyszukane w sieci (Apple Developer Forums) — `-16976` pojawia się w innych realnych zgłoszeniach dokładnie w kontekście `AVAssetExportSession` przy niezgodności formatu/kodeka między platformami/urządzeniami (jeden przypadek: plik grany poprawnie na macOS, ale `isPlayable = false` i export failuje z tym samym kodem na iOS). To pasuje do dotychczasowych obserwacji: błąd zawsze w `mainExport`, niezależnie od filtra/jakości, 100% powtarzalny na URZĄDZENIU znajomej z tymi samymi zdjęciami — profil idealnie pasujący do niejednolitego wsparcia dekodowania konkretnego kodeka na różnych modelach iPhone'a, nie do treści samych zdjęć.
+
+`ImageToVideoRenderer.swift` renderuje KAŻDE zdjęcie do pliku pośredniego w **ProRes422HQ** (świadoma decyzja z 29.07.2026, dla jakości — "kopia kopii" przy dwóch kolejnych kodowaniach H.264). To dokładnie ten plik pośredni wchodzi do `mainExport`. Wsparcie dekodowania ProRes w potoku `AVAssetExportSession` nie jest jednolite na wszystkich modelach iPhone'a — appka testowana dotąd głównie na urządzeniu developera i narzeczonej, teraz trafia przez TestFlight na dowolny sprzęt.
+
+**Naprawione**: `ImageToVideoRenderer` zmieniony z ProRes422HQ na **HEVC** — świadomie zaakceptowana rezygnacja z decyzji o jakości z 29.07, bo niezawodność wygrywa z realnym, powtarzalnym crashem u testerów. Praktycznie zero straty jakości W TYM konkretnym przypadku: plik pośredni to jedna NIERUCHOMA klatka powtórzona przez cały klip (ruch typu Ken Burns dokłada się później w `VideoComposer` przez transformy na poziomie kompozycji) — HEVC kompresuje statyczną treść niemal bezstratnie, i jest dekodowalny uniwersalnie na iOS 18+. Dodane też jawne właściwości koloru (SDR Rec.709, ten sam wzorzec co reszta pipeline'u) i wysoki `AVVideoAverageBitRateKey` (8 bitów/piksel) na wypadek nietypowych treści.
+
+**Uczciwie**: to NAJBARDZIEJ prawdopodobna przyczyna ze wszystkich dotychczasowych teorii (poparta realnym kodem błędu + wyszukaniem podobnych zgłoszeń), ale wciąż nie 100% pewność bez logów z jej urządzenia — jeśli błąd wróci mimo tej zmiany, `describeErrorChain` z build 20 da nam jeszcze głębszy trop.
+
+## 30.08.2026 — start modułu AI: "AI Director" (pierwsza funkcja z `Docs/AI.md`)
+
+User: "zacznijmy budowe AI dodam ze w apce bedziemy miec mozliwosc z AI albo bez do wyboru przez uzytkownika" — świadome odwrócenie wcześniejszej zasady "AI czeka na realnych testerów" (patrz pamięć `feedback_ai_never_blocks`), z nowym twardym wymogiem: appka MUSI umieć działać bez AI, z wyboru usera.
+
+**Wybory na starcie (user, przez pytania)**: (1) pierwsza budowana funkcja to **AI Director** — jedno zdanie usera opisujące nastrój → appka dobiera filtr/przejścia/tempo w JUŻ istniejącym silniku Studio, zamiast Memory AI (za duży fundament) czy Voice Over (osobny temat syntezy mowy); (2) silnik rozumienia języka **całkowicie on-device** (`FoundationModels`, framework Apple z iOS 26+), świadomie zamiast chmury (Claude/GPT) — zero kosztów per-request, zero danych usera wysyłanych gdziekolwiek.
+
+**Sprawdzone przed kodowaniem** (nie zgadywanie API z pamięci): SDK na tej maszynie to iPhoneOS26.5, `FoundationModels.framework` faktycznie obecny — wyciągnięty i przeczytany `.swiftinterface` (prawdziwe sygnatury `LanguageModelSession`, `@Generable`/`@Guide`, `SystemLanguageModel.default.availability`) zamiast polegać na przybliżonej pamięci WWDC25. `project.yml` ma `deploymentTarget: iOS 18.0` — ŚWIADOMIE bez podnoszenia (FoundationModels wymaga iOS 26+, ale cała appka nie musi) — każde użycie owinięte `#if canImport(FoundationModels)` + `@available(iOS 26.0, *)` + runtime `if #available`, więc appka kompiluje się i działa normalnie na starszych urządzeniach/systemach.
+
+**Zbudowane** (zero nowego pipeline'u renderowania — AI Director tylko ustawia już istniejące pokrętła edytora):
+- `AIDirectorStyle.swift` — prosty model wyniku: `colorStyle: ColorStyle`, `transitionPool: Set<TransitionStyle>`, `paceMultiplier: Double` (mnożnik na już istniejące `MediaItem.speed`, NIE na `duration` — długość finalnego filmiku ma zostać dopasowana do muzyki jak dziś), `musicHint: String` (appka nie umie sama wybrać usera piosenki z jego biblioteki — `MusicPicker` to systemowy `MPMediaPickerController` bez katalogu nastrojów, więc tylko podpowiedź tekstowa gatunku).
+- `AIDirectorEngine.swift` — `AIDirectorAvailability` (`.available`/`.disabledByUser`/`.appleIntelligenceNotEnabled`/`.modelNotReady`/`.deviceNotEligible`, czyta `SystemLanguageModel.default.availability` + toggle usera); `suggestStyle(from:)` woła `LanguageModelSession(instructions:).respond(to: description, generating: Suggestion.self)` z `@Generable struct Suggestion` (pole `pace: Pace`, `look: Look`, `note: String` — obie zagnieżdżone enumy też `@Generable`), mapowane ręcznie (switch, nie rawValue) na `AIDirectorStyle`; **5 presetów zawsze dostępnych bez AI** (Cinematic/Emotional/Energetic/Calm Travel/Vintage), każdy z gotowym `colorStyle`/`transitionPool`/`paceMultiplier`/podpowiedzią muzyczną.
+- `AIDirectorView.swift` — sheet z polem tekstowym + przyciskiem "Suggest Style" (TYLKO gdy `availability.isUsable`, inaczej czytelny komunikat KTÓRY z pięciu powodów akurat obowiązuje) i listą presetów (zawsze widoczna, działa niezależnie od AI). Wybór z presetu lub wynik AI robią DOKŁADNIE to samo: `colorStyle`/`enabledTransitions` = wprost, `items[i].speed` = pomnożone przez `paceMultiplier` (clamped 0.25–4.0).
+- `EditView.swift` — nowy przycisk "AI Director" (ikona `sparkles`) w `bottomToolbar`, obok istniejącego "Style"; sheet wywołuje `syncProject()` po zastosowaniu.
+- `ProfileView.swift` — nowa sekcja z `Toggle` "AI Features" (`@AppStorage("aiFeaturesEnabled") = true`, domyślnie włączone) nad sekcją Avatar Frame, z footerem tłumaczącym że appka nic nie wysyła nigdzie i że wyłączenie zostawia same presety.
+
+**Lokalizacja**: 21 nowych stringów (opisy, placeholder, 5 nazw presetów, 5 podpowiedzi muzycznych, komunikaty niedostępności) przetłumaczone od razu na wszystkie 27 języków (ten sam skrypt Python merge do `Localizable.xcstrings` co zawsze) — zgodnie z regułą "tłumacz nowe stringi od razu". "Cinematic"/"Vintage"/"Done" ponownie użyte z już istniejących kluczy (te same nazwy presetów co `ColorStyle`).
+
+**Build**: `xcodegen generate` → `xcodebuild build` (Debug, device "Pit") → **BUILD SUCCEEDED** (w tym makra `@Generable`/`@Guide` skompilowały się poprawnie) → `devicectl device install app` + `device process launch` na "Pit" (iPhone 16 Pro, wspiera Apple Intelligence).
+
+**Nie zrobione dziś, świadomie odłożone**: Memory AI/Story Builder/Voice Over/Emotion AI (patrz `Docs/AI.md`) — user zdecydował zacząć od jednej, najmniejszej, samodzielnej funkcji zamiast całego modułu naraz.
+
+Build → **BUILD SUCCEEDED**, zainstalowane na "Pit".
+
+## 30.08.2026, ciąg dalszy — 5 premium przejść (odblokowane dla Foundera), realny crash przy imporcie 140 zdjęć NAPRAWIONY, bug suwaka Trim, automatyczne dopasowanie Memory→trasa
+
+**Premium przejścia.** User: "mamy juz ramki, teraz potrzebujemy premium przejść między zdjęciami" — poprosił o research co ma CapCut i podobne (WebSearch, kategorie: Basic/Camera/Light Effect/Distortion/Glitch/Blur/3D). Zbudowane 5 nowych stylów w `TransitionStyle`/`PremiumTransitionEffect.swift`/`PremiumTransitionGrader.swift`: **Whip Pan** (czysty transform ramp jak pozostałe 10), **Flash**/**Blur Dissolve**/**Light Leak**/**Glitch** (DRUGI, opcjonalny przebieg CIFilter na już wyeksportowanym pliku, w oknie czasowym przejścia — ten sam duch co `ColorGrader`, żaden custom `AVVideoCompositing`, świadomie dalej odrzucone jako "wszystko albo nic"). Prawdziwa struktura CIFilter: rozjazd kanałów RGB przez `CIColorMatrix`+przesunięcie+`CIAdditionCompositing` dla Glitch, proceduralny `CIRadialGradient` dla Light Leak (zero zasobów graficznych), envelope "okno Hanna" (`0.5-0.5·cos(2π·postęp)`) dla płynnego narastania/zanikania każdego efektu.
+
+User: "wprowadz jako premium te co możemy, będą dostępne jako premium nie w podstawie" → `isPremium`/`Section` z kłódką w `StyleView`, appka nie ma jeszcze płatności. Potem: "ja chce miec dostep na swoim telefonie... ale to bedzie zachowane dla premium i dla mnie" → `TesterRegistry.hasPremiumUnlocked` (Founder-only, węższe niż `isTester` — Alexandra tego NIE dostaje), premium sekcja w `StyleView` zamienia się w normalny, klikalny toggle TYLKO dla Foundera, reszta userów widzi kłódkę.
+
+**Realny crash przy imporcie 140 zdjęć.** User, wkurzony (20 minut wyboru zdjęć w plecy): "wcisnalem create memory... doszlo do 100 i nic sie nie stalo... bylo ich 140". Diagnoza: `MediaItemLoader.load`/`MediaAssetLoader.thumbnail(forAssetLocalIdentifier:)` dekodowały KAŻDE zdjęcie w PEŁNEJ rozdzielczości źródła tylko po to, żeby zrobić miniaturkę osi czasu — przy 140 zdjęciach to kilka GB trzymane naraz w pamięci, iOS po cichu zabijał appkę w tle (jetsam), zero widocznego crasha. Naprawione: miniaturki generowane przez ImageIO (`CGImageSourceCreateThumbnailAtIndex`, 640px) bezpośrednio z pliku, bez pośredniego kroku pełnej rozdzielczości — w dwóch miejscach (świeży import i ponowne otwarcie zapisanego projektu). **Potwierdzone na żywo**: podłączony kablem `idevicesyslog` + `devicectl device info processes` (Monitor) podczas realnego ponownego importu tych samych 140 zdjęć — telefon przeszedł przez realny "critical" memory pressure (widoczne w logach systemowych), ale appka PRZETRWAŁA cały import bez ani jednego zrzucenia procesu. User: "ok zaladowalo sie :)".
+
+**Regresja jakości eksportu, znaleziona i naprawiona TEGO SAMEGO dnia.** Po fakcie odkryte (czytając własny komentarz w `MediaAssetLoader.swift`, który o tym explicite ostrzegał): `MediaItem.thumbnail`/`OverlayItem.thumbnail` to NIE tylko podgląd UI — to dosłownie źródłowe piksele karmiące finalny render eksportu dla zdjęć (`VideoComposer.resolveSourceURL` → `ImageToVideoRenderer`). Zmniejszenie tej miniaturki (naprawa crashu wyżej) po cichu przywróciło DOKŁADNIE ten sam bug jakości co 29.07.2026 ("zdjęcia nie są już tej samej jakości"). Naprawione właściwie: nowa `MediaAssetLoader.fullResolutionImage(forAssetLocalIdentifier:)` (pełna rozdzielczość, WYŁĄCZNIE do eksportu) wołana świeżo, SEKWENCYJNIE (`resolveSourceURLs` już ma `maxConcurrent = 1` z innego powodu — enkoder), więc bezpiecznie pamięciowo mimo pełnej rozdzielczości — w pamięci naraz najwyżej JEDEN taki obraz, nie wszystkie zdjęcia projektu. Mała miniaturka (640px) zostaje wyłącznie dla UI/timeline.
+
+**Bug suwaka Trim.** Zrzut ekranu usera: "dlaczego poczatku filmiku nie moge przesunac??". Przyczyna: uchwyt (`Capsule`, `.position(x:)` centruje na środku) dla nietkniętego klipu (`trimStart == 0`) renderował się dokładnie na krawędzi paska — połowa jego szerokości poza widocznym/chwytnym obszarem. Naprawione w `TrimView.TrimRangeSlider`: WIDOCZNA/łapalna pozycja uchwytu wcięta o pół jego szerokości od krawędzi paska (`displayStartX`/`displayEndX`), logika samego przeciągania (liczona względem pełnej szerokości paska, nie pozycji spoczynkowej uchwytu) bez zmian — działa też symetrycznie dla prawego uchwytu przy nieprzyciętym końcu klipu.
+
+**Automatyczne dopasowanie Memory→trasa (`TripMemoryMatcher.swift`).** User: "czy nasze AI moze pomoc w znalezieniu zdjec na danym przystanku... trase robimy wczesniej zanim gdzies polecimy". Odpowiedź: nie potrzeba AI — appka już zna lokalizację/datę każdego zdjęcia (`MediaAssetLoader.locationsAndDates`, ten sam mechanizm co Smart Route). Nowy matcher: po udanym eksporcie (`EditView.checkTripMemoryMatch()`) appka sprawdza czy lokalizacja zdjęć projektu pasuje (promień 20km, TEN SAM co klastrowanie na World Globe) do jakiegoś NIEPRZYPISANEGO przystanku w zapisanych podróżach — jeśli tak, jeden alert "To wygląda jak [Trasa] – [Miejsce]. Połączyć?", zawsze RĘCZNE potwierdzenie (nigdy ciche łączenie). Pomija projekty już powiązane z czymkolwiek (nie dubluje linków). User: "tak prosze to bedzie idealne".
+
+**Nie zbudowane dziś, świadomie odłożone**: skrót "Link a Memory" wprost z menu World Globe (propozycja z wcześniejszej części rozmowy, user przeszedł do pytania o AI zanim potwierdził) — nowy matcher po eksporcie realnie rozwiązuje główny problem (nie trzeba już szukać na Globe), więc mniej pilne; do ewentualnego dobudowania jeśli user zdecyduje że wciąż chce ręcznego skrótu z poziomu Globe.
+
+Wszystkie zmiany: `xcodegen generate` → `xcodebuild build` (Debug, "Pit") → **BUILD SUCCEEDED** za każdym razem → `devicectl install`+`launch`. Lokalizacja: wszystkie nowe stringi (premium przejścia, alert dopasowania trasy) przetłumaczone od razu na 27 języków, ten sam skrypt Python merge do `Localizable.xcstrings` co zawsze.
+
+## 30.08.2026, ciąg dalszy — czyszczenie tmp przy zejściu do tła, World Globe pokazuje miejsca BEZ trasy, kraje/miasta z Memories liczą się do punktacji
+
+**Czyszczenie plików tymczasowych.** User: "sprawdz czy czyszczenie aplikacji dziala bo nie chce zeby zawalala telefon jesli ktos z niej korzysta". Sprawdzone na żywo na "Pit" (`devicectl device info files`): **403MB w 303 plikach** po ok. godzinie testowania w jednej, ciągłej sesji appki. `TempFileCleanup.purgeStaleTemporaryFiles()` sam w sobie działa poprawnie (kasuje pliki starsze niż godzinę), ALE odpalał się WYŁĄCZNIE przy zimnym starcie (`PMemoriesAppApp.init()`) — dopóki ktoś nie force-quituje appki (rzadkie u zwykłych userów), czyszczenie nigdy się nie uruchamia, pliki (głównie `PhotoRenderCache`) rosną bez ograniczeń przez CAŁĄ długość sesji. Naprawione: dodatkowe wywołanie przy `scenePhase == .background` (`.onChange` na `WindowGroup`) — znacznie częstsza, realna okazja niż czekanie na pełny restart.
+
+**World Globe pokazuje miejsca bez zaplanowanej trasy.** User: "czy mozemy zrobic tak jak ktos tworzy memoeirs zeby sie pojawialy miejsca na globie bez trasy ale z gps zdjec". `WorldGlobeView` przebudowany: miejsca nie pochodzą już wyłącznie z `SavedStop` (Travel Map) — każdy gotowy Memory BEZ powiązanego przystanku sam dokłada "surowe punkty" wprost z lokalizacji GPS swoich zdjęć (`MediaAssetLoader.locationsAndDates`), klastrowane RAZEM z przystankami (ten sam promień 20km). Klaster z przystankiem używa jego już-geokodowanej nazwy (zero sieci); klaster czysto z Memories dostaje nazwę przez JEDNORAZOWE odwrotne geokodowanie przy budowaniu listy. Menu po tapnięciu: "Show Route" znika, gdy miejsce nie ma żadnej trasy (dawne założenie "każdy klaster ma trasę" już nieprawdziwe) — zostaje samo "Go to Memory". `places` zmienione z computed property na `@State` przeliczany RAZ w `.task` (nie przy każdym renderze) — inaczej appka zasypywałaby Apple odwrotnymi zapytaniami geokodowania przy każdym tapnięciu pinezki.
+
+**Kraje/miasta z Memories liczą się do Explorer Score.** User doprecyzował: "chodzi o punktacje tylko za panstwa i miasta bo bez mapy km nie liczymy". Dodane do `SavedProject`: `detectedCountryCode`/`detectedCityName`, rozwiązywane RAZ po eksporcie (`EditView.resolveMemoryLocationIfNeeded()`, niezależnie od tego czy user potwierdzi sugestię linku do trasy — link dzieje się asynchronicznie, punktacja nie może na to czekać). `TravelAchievementsCalculator.explorerScore(from:projects:)` dolicza te pola do liczby krajów/miast (Set, bez duplikatów), ale km/przewyższenie/tryby transportu ZOSTAJĄ wyłącznie z `SavedStop` — surowe zdjęcie nie ma kolejności/odcinków trasy, więc nie da się z niego policzyć dystansu, dokładnie jak user zauważył. Projekty JUŻ powiązane z przystankiem pomijane (ich kraj/miasto już liczy się przez ten przystanek). 4 miejsca wywołania (`AchievementsView`/`LeaderboardView`/`OnboardingView`/`TravelPassportView`) zaktualizowane, `projects` domyślnie `[]` dla wstecznej zgodności.
+
+Build (dłuższy niż zwykle — zmiana w `TravelAchievements.swift` dotyka wielu plików) → **BUILD SUCCEEDED** → `devicectl install`+`launch` na "Pit".
+
+## 30.08.2026, ciąg dalszy — build 25 (1.0.2) wysłany na TestFlight, dwa realne bugi w World Globe znalezione na żywo przez usera i naprawione
+
+User: "wrzucmy nowy build" — `CFBundleVersion` 24→25 (`CFBundleShortVersionString` zostaje "1.0.2"). Sprawdzony proces: `xcodegen generate` → `xcodebuild archive` (Release, `build/PMemories_build25.xcarchive`) → `xcodebuild -exportArchive` → `build/export25/PMemories.ipa` (15.8MB) → `xcrun altool --upload-app` (hasło z Keychain, `PMemoriesUpload`). **UPLOAD SUCCEEDED**, Delivery UUID `967aad08-f256-4a35-a99c-c7aab8ea1a4a`. Przy okazji zaktualizowany tekst "What to Test" (EN+PL) o dzisiejsze nowości (AI Director, World Globe bez trasy) i poprawki (crash 140 zdjęć, uchwyt Trim) — user wkleja ręcznie w App Store Connect (appka nie ma dostępu do tego pola przez CLI).
+
+**Bug 1 — Globe nie odświeżał się po nowym eksporcie.** User wyeksportował Tajlandię w 4K, wrócił na już wcześniej otwarty ekran Globe — nowe miejsce się nie pojawiło ("to nie zostalo naprawione"). Przyczyna: `.task { }` (bez `id`) liczy `places` RAZ na całe życie danej instancji widoku — jeśli SwiftUI nie zniszczyło i nie stworzyło jej od nowa, dane zostawały nieaktualne. Naprawione: `.task(id: placesRebuildTrigger)`, gdzie trigger to suma liczby zapisanych projektów i przystanków — zmiana którejkolwiek wymusza przeliczenie, niezależnie od cyklu życia widoku. Potwierdzone zrzutem ekranu: po naprawie Chiang Mai i Phuket pokazały miniaturki (wykryte z GPS), tylko Suvarnabhumi Airport (przystanek tranzytowy bez własnych zdjęć w filmie) słusznie miał samo "Show Route".
+
+**Bug 2 — link do filmu nie obejmował całej trasy.** User: "chce zeby kazde miejsce co bylem w tajlandii mi to pokazywalo... caly ten trip jest cala trasa wiec wszystkie przystanki powinny byc podpiete pod jedna [Memory]" (Doha, lotnisko, wszystkie przystanki). Dotychczasowa logika liczyła `linkedProjectIDs` TYLKO z przystanku, który faktycznie ma `linkedProjectID` ustawiony (albo z surowych punktów GPS w TYM klastrze) — reszta przystanków tej samej podróży (np. lotnisko tranzytowe bez zdjęć) nie dostawała nic. Naprawione w `WorldGlobeView.place(for:)`: dla każdej podróży przechodzącej przez klaster appka dolicza TERAZ linki ze WSZYSTKICH przystanków tej podróży, nie tylko tych w bieżącym klastrze — jeden powiązany przystanek "zaraża" linkiem całą trasę, zgodnie z mentalnym modelem usera "to jedna wycieczka, jeden film".
+
+Oba buildy (Debug, "Pit") → **BUILD SUCCEEDED** → `devicectl install`+`launch`.
+
+## 30.08.2026, ciąg dalszy — AI Director podpowiada realne piosenki z biblioteki usera
+
+User: "czy AI moze podpowiadac piosenke jaka mozna dodac do swoich zdjec?" — po potwierdzeniu zakresu (TYLKO własna biblioteka Apple Music/zakupione utwory, appka nie ma dostępu do żadnego zewnętrznego katalogu/API muzycznego jak Spotify) zbudowane: `AIDirectorStyle` dostał `musicGenreKeywords: [String]` (obok istniejącego tekstowego `musicHint`) — każdy z 5 presetów i mapowanie AI (po `pace`) mają teraz swój zestaw słów kluczowych gatunku. Nowy `MusicLibrarySuggester.swift`: `MPMediaQuery.songs()` (ten sam framework co `MusicPicker`, wymaga jawnego `MPMediaLibrary.requestAuthorization` przy pierwszym użyciu z kodu, nie tylko przez systemowy picker) filtrowane po WYSTĘPOWANIU słowa kluczowego w tagu gatunku (case-insensitive substring — dokładne dopasowanie prawie nigdy by nic nie znalazło, tagi w realnych bibliotekach są bardzo niespójne). `AIDirectorView` po zastosowaniu stylu (z AI albo presetu) sam odpytuje bibliotekę i pokazuje do 3 realnych utworów usera — tapnięcie ustawia od razu jako muzykę projektu, bez otwierania osobnego pickera. Pusta lista gdy user nic pasującego nie ma — appka nie zmyśla/nie sugeruje utworów spoza jego biblioteki.
+
+Build → **BUILD SUCCEEDED** → `devicectl install`+`launch` na "Pit".
+
+## 31.08.2026 — pełny przegląd kodu dzisiejszych zmian (user: "zobacz czy nie ma zadnych bugow"), 2 realne buggi znalezione i naprawione
+
+**Bug 1 (poważny) — zduplikowane `id` na World Globe.** `GlobePlace.id` dla klastrów CZYSTO z Memories (bez przystanku) budowany był wyłącznie z identyfikatorów projektów w klastrze. Jeśli JEDEN Memory ma zdjęcia w dwóch odległych miejscach bez własnych przystanków (dokładnie przypadek Chiang Mai + Phuket z dzisiejszych testów), oba klastry dostawały IDENTYCZNY string (ten sam, jedyny projekt) — `ForEach`/`Map(selection:)` traciły jednoznaczność który pin to który, tapnięcie mogło otworzyć złe miejsce. Naprawione: dopisana zaokrąglona współrzędna klastra do id (unikalna z definicji grupowania po odległości).
+
+**Bug 2 (drobny) — kamera Globe nie dopasowywała się do nowych pinezek.** `hasSetInitialCamera` ustawiane bezwarunkowo przy PIERWSZYM przebiegu `rebuildPlaces()`, nawet gdy `places` było wtedy puste (pierwsza wizyta bez zapisanych miejsc). Skoro `.task(id:)` (naprawa z wcześniej dziś) może teraz przeliczać `places` wielokrotnie w tej samej sesji widoku, kamera nigdy nie dopasowywała się do pinezek pojawiających się PÓŹNIEJ, jeśli pierwszy przebieg był pusty. Naprawione: flaga ustawiana dopiero gdy `places` faktycznie coś zawiera.
+
+Reszta dzisiejszych zmian (AI Director, premium przejścia, TripMemoryMatcher, Explorer Score z Memories, MusicLibrarySuggester, poprawki OOM/jakości/Trim) przejrzana bez znalezienia dodatkowych błędów — logika kwalifikacji premium/nie-premium w wagach postępu eksportu (`EditView.performExport`) i timing okien `PremiumTransitionGrader` względem timeline'u głównego eksportu potwierdzone jako poprawne.
+
+Build → **BUILD SUCCEEDED** → `devicectl install`+`launch` na "Pit".
+
+## 06-07.09.2026 — przebudowa "My Travel Journey" (dynamiczny canvas, prawdziwe tekstury), usunięcie całego zestawu `PremiumBadge*` z ramek avatara, TODO na jutro
+
+**Ramki avatara — `PremiumBadge*` (28 assetów) całkowicie WYCOFANE z pickera.** Po dwóch dniach iteracji (maska otworu, skalowanie zdjęcia do bounding boxu, `outerScale` do wyrównania rozmiaru z Free) user ostatecznie zdecydował: "koniec z nowymi ramkami... nie potrafisz ich ogarnac i nie spelniaja wymogu i standardu". Picker wrócił do 2 sekcji: **Free** (10 programowych ramek, bez zmian) i **Seasonal & Limited** (tylko stary zestaw `seasonal*` z 30.08, widoczny wyłącznie dla Foundera) — renderowane TĄ SAMĄ ścieżką co Free (pełne zdjęcie na całej karcie, `AvatarFrameBadge` sam dobiera rozmiar PNG przez `overlayScaleFactor`), bez żadnego osobnego skalowania/wyjątku. Assety `PremiumBadge*` zostają na dysku nieusunięte.
+
+**"My Travel Journey" — przebudowa kompozycji.** Usunięty sztywny canvas 1080×1920 z pustą przestrzenią na dole (`Spacer()`) — teraz stała szerokość 1080, dynamiczna wysokość. Sekcje (mapa/statystyki/pieczątki) nachodzą na siebie (ujemny padding), statystyki wyglądają jak bilet pokładowy (przerywana perforacja), pieczątki krajów jak prawdziwe stemple (podwójna obwódka, obrót). User dostarczył zestaw ~35 obrazów AI-generowanych (tekstury papieru + arkusze elementów scrapbookowych) — wybrane i wycięte: 6 różnych tekstur papieru (losowana jedna per wejście na ekran, `backgroundTextureName`, żeby plakaty różnych userów się nie powtarzały), prawdziwy wycięty kompas (nagłówek) i taśma washi (przypięcie polaroidów) — jedyny z ~31 plików z realną przezroczystością alfa, reszta to płaskie RGB (checkerboard w podglądzie to grafika wypalona w pikselach, nie kanał alfa).
+
+**Bug — kompletnie pusty ekran po zmianie tła na obrazek.** Po podmianie tła z gradientu na `Image(...).resizable().aspectRatio(.fill)` cały plakat przestał się renderować (pusty szary ekran, nawet bez błędu). Przyczyna namierzona metodą eliminacji (dwie próby naprawy nie pomogły — najpierw goły `Image` bez frame w `ZStack`, potem `GeometryReader` explicite): kombinacja `.fixedSize(horizontal:false, vertical:true)` (używane do zmierzenia dynamicznej wysokości do przeskalowania podglądu) z JAKIMKOLWIEK `GeometryReader` w zmierzanym poddrzewie zapętla layout SwiftUI do zera. Finalne rozwiązanie: usunięcie całej maszynerii pomiaru wysokości/skalowania podglądu (`PosterHeightPreferenceKey`, `measuredHeight`) — plakat renderuje się w PEŁNYM rozmiarze (1080pt) wewnątrz `ScrollView([.horizontal, .vertical])` zamiast próby dopasowania go do szerokości ekranu. Mniej eleganckie (trzeba przewijać), ale eliminuje całą klasę błędów związanych z tym konkretnym połączeniem modyfikatorów.
+
+**Nawracające zawieszenia `xcodebuild` (wielokrotnie w ciągu wieczora).** Wzorzec identyczny jak wcześniej w sierpniu (zero procesów potomnych, utknięcie na etapie enumeracji `DeviceKit`/`CoreSimulator/Profiles`), ale TYM RAZEM nie z powodu zapełnionego dysku (15GB wolne, sprawdzone). User zauważył, że problem występuje tylko poza domem — prawdopodobna przyczyna: `devicectl`/Xcode i tak łączy się z usługami sieciowymi Apple (walidacja podpisu/profilu, "developer disk image services") nawet przy zwykłym buildzie na fizyczne urządzenie po USB, więc niestabilna sieć w tej lokalizacji powoduje wieszanie zamiast zwrócenia błędu. Rozwiązanie doraźne: `kill -9` zawieszonego procesu + natychmiastowy retry (za każdym razem skutkowało powodzeniem).
+
+**TODO na jutro — inteligentny dobór zdjęć do polaroidów** (user, do rozpisania krok po kroku, NIE zaimplementowane): zamiast obecnych "5 najnowszych zdjęć z różnych krajów", każdy polaroid miałby własną, znaczącą kategorię/powód wyboru zamiast być losowym najlepszym zdjęciem:
+- **Where It All Began** — pierwsza zapisana podróż w appce.
+- **My Favourite Place** — MANUALNY wybór usera (appka nie może zgadywać ulubionego miejsca).
+- **Farthest From Home** — miejsce najdalej od domu (dystans), nie "najdłuższy lot".
+- **Longest Journey** — podróż trwająca najdłużej (dni).
+- **My Best Memory** — ręcznie wybrane zdjęcie przez usera.
+Dodatkowe kategorie do rozważenia: Most Visited (kraj z największą liczbą wizyt), Longest Stay (najdłuższy pobyt w jednym miejscu), First Adventure / Latest Adventure, Hidden Gem (miejsce mało odwiedzane ale ważne). Podpis pod polaroidem miałby pokazywać zarówno miejsce JAK i kategorię (np. "Tokyo, Japan — Farthest from home"). User rozważa też UI "Choose your memories" pozwalające userowi podmienić którąkolwiek automatyczną kategorię na własny wybór. WAŻNE: to wymaga NOWEGO algorytmu wyboru zdjęcia W OBRĘBIE danej kategorii (nie pierwsze z brzegu, tylko np. z uwzględnieniem ostrości/kompozycji/orientacji) — osobny, większy temat do rozpisania.
+
+Build (kilka iteracji) → **BUILD SUCCEEDED** za każdym razem po naprawie → `devicectl install`+`launch`.
+
+**Ciąg dalszy tego samego wieczoru — pusty ekran wrócił DWA razy, ostateczne rozwiązanie: bitmapa zamiast live-SwiftUI-scalingu.** Po powrocie do "pełny rozmiar + scroll w dwie strony" user od razu zgłosił: "dlaczego nie mam calego obrazu tylko musze ruszac palcem" — próba nr 2 przywróciła pomiar/skalowanie (`.fixedSize` + `GeometryReader` w tle jako `.background()`, TERAZ bez zagnieżdżonego `GeometryReader` w samym tle) dała **znowu pusty ekran**. Wniosek: problem nie leżał (tylko) w zagnieżdżeniu `GeometryReader`, tylko w samej kombinacji `.fixedSize()`+pomiar+`.scaleEffect()` w tym konkretnym drzewie widoku — druga hipoteza też się nie potwierdziła. **Ostateczne, zadziałało rozwiązanie**: całkowita rezygnacja z live-SwiftUI-scalingu na rzecz renderowania plakatu RAZ do zwykłego `UIImage` (`renderPosterImage()`, ten sam `ImageRenderer` co przy eksporcie, `proposedSize` z `height: nil` żeby sam dobrał wysokość), zapisanego w `@State posterImage`, wyświetlanego zwykłym `Image(uiImage:).resizable().scaledToFit()` — zero `GeometryReader`, zero `.fixedSize()`, zero ręcznej geometrii. Podgląd i eksport/share używają TERAZ dokładnie tego samego rendera (`prepareShareImage()` po prostu opakowuje już gotowy `posterImage`), więc nie mogą się rozjechać. To zadziałało od razu i ostatecznie.
+
+**Poprawiona kompozycja (dashe/pieczątki/pasek) faktycznie zadziałała — ale user wskazał głębszy problem: to NIE jest kwestia pojedynczych elementów.** Po naprawieniu pustego ekranu poster realnie renderował się z prawdziwymi danymi (14 krajów, 25 podróży, 66 388 km, 51 lotów, prawdziwe zdjęcia, prawdziwa trasa z samolocikami) — ale user porównał to bezpośrednio z referencyjnym mockupem (przesłanym jako obraz) i ocenił jako "tragiczne" w zestawieniu. WAŻNE, user explicite zablokował dalsze punktowe poprawki (np. zaczynałem od "mapa nie pasuje kolorystycznie do papieru" + realny bug: "Gatwick" nie jest łapane przez `looksLikeAirport()` bo nazwa nie zawiera słowa "airport") — user: "mapa nie jest problemem problemem jest caly wyglad stronty... nie zmieniaj mapy tylko dlatego, że ją zauważyłeś... to nie rozwiązuje problemu". Diagnoza usera: **to problem CAŁEJ kompozycji/gęstości/hierarchii, nie jednego elementu.**
+
+## TODO na środę (09.09.2026) — pełna przebudowa kompozycji plakatu "My Travel Journey" względem referencji, NIE zaimplementowane
+
+User dał jasną zasadę na start następnej sesji: **REFERENCE = wzorzec wyglądu/kompozycji. CURRENT = prawdziwe dane do zachowania (zdjęcia, mapa, statystyki, kraje).** Cel: przebudować SPOSÓB PREZENTACJI danych, nie same dane.
+
+**Metoda pracy (user explicite wymaga, ZANIM padnie choćby jedna linijka kodu):** zrobić precyzyjne porównanie CURRENT vs REFERENCE per element — marginesy, względne rozmiary elementów, odstępy pionowe, rozmiar zdjęć, rozmiar tytułu, powierzchnia mapy, wysokość paska statystyk, gęstość country-stamps, proporcje stopki. Najpierw zidentyfikować RÓŻNICE W LAYOUCIE systematycznie, dopiero potem kodować — nie zgadywać pojedynczych "bugów".
+
+**8 konkretnych różnic wskazanych przez usera** (referencja vs obecny stan):
+1. **Obecny plakat zbyt pusty/minimalistyczny** — referencja wypełnia powierzchnię, elementy tworzą gęstą kompozycję.
+2. **Elementy za małe względem całości** — nagłówek, zdjęcia, mapa, statystyki, country stamps, teksty dekoracyjne — wszystko ma mocniejszą skalę w referencji, mniej pustej przestrzeni.
+3. **Inna hierarchia wizualna** — w referencji oko prowadzi: TYTUŁ → zdjęcia+mapa → statystyki → country stamps → slogan/footer. Obecnie wszystko rozłożone równomiernie, przez co wygląda jak "raport aplikacji", nie kolekcjonerski plakat.
+4. **Zdjęcia za mało zintegrowane z kompozycją** — w referencji większe, nachodzą na mapę, tworzą warstwową kompozycję; obecnie wyglądają jak "kilka zdjęć położonych na mapie".
+5. **Country stamps kompletnie inne** — referencja: małe, zwarte, dekoracyjne pieczęcie tworzące mocny pas. Obecnie: każdy kraj to duża karta z dużą ilością pustego miejsca, wygląda jak UI aplikacji.
+6. **Za dużo jasnej pustej przestrzeni między sekcjami** — referencja jest "packed", elementy blisko siebie, jedna spójna ilustracja.
+7. **Za słaby charakter vintage** — nie tylko kolor papieru, ale gęstość elementów, detale ilustracyjne, dekoracyjne ramki, stemple, tekstury, ozdobne linie, małe ikony, "handwritten" podpisy, warstwowość, asymetria — kompozycja jak prawdziwy travel scrapbook, nie jak ekran z danymi.
+8. **Całość wygląda jak "ekran aplikacji zawierający plakat"**, a nie jak "gotowy plakat pokazany w aplikacji" — to jest sedno całej reszty punktów.
+
+**Drobniejsze, wcześniej znalezione, wciąż otwarte tematy** (niższy priorytet niż przebudowa kompozycji, ale do ogarnięcia przy okazji):
+- `looksLikeAirport()` nie łapie "Gatwick" (nazwa nie zawiera słowa "airport"/"lotnisko") — wymaga listy znanych nazw miast-lotnisk (Gatwick, Heathrow, Luton, Stansted, Schiphol itd.) albo innego sygnału (np. flaga transportu na przystanku) zamiast samego dopasowania tekstu.
+- Inteligentny dobór zdjęć do polaroidów (kategorie Longest Journey / Favourite Place / Farthest From Home / Most Visited / First Adventure itd. — pełna lista i uzasadnienie w poprzednim wpisie wyżej) — user rozbudował to jeszcze bardziej: "Poster Story Engine" wybierający najpierw HISTORIĘ plakatu, a dopiero potem dopasowujący zdjęcia do "photo slots" tej historii (hero photo, destination photo, candid/memory photo, landscape). Osobny, duży temat, do rozpisania krok po kroku.
+- Rozważane developerskie zasady dla przyszłych generacji posterów (żeby "cała rodzina" plakatów PMemories trzymała spójny styl): ten sam język vintage, ten sam "materiał" papieru, ta sama filozofia typografii, to samo traktowanie zdjęć, to samo słownictwo dekoracyjne.
+
+**Dodatkowy materiał na środę — gotowe znaczki krajów w stylu pasującym do referencji.** User dostarczył 2 kolejne arkusze AI-generowane (`644BA27D-EF30-4398-80CD-D28FB103D417.PNG`, `1BB22B52-333E-46F7-9E6C-D7B5811A0B51.PNG`, oba 1536×1024, w Downloads) — "Europe Country Stamps Collection 1 of 2 / 2 of 2", każdy z ~25 osobnymi kwadratowymi znaczkami (kolorowa cienka obwódka + czarno-biała ilustracja linearna + nazwa kraju wielkimi literami w tym samym kolorze co obwódka), łącznie pokrywające ~50 krajów Europy. Styl DOKŁADNIE pasuje do referencyjnego mockupu plakatu (bo to prawdopodobnie ten sam generator/prompt). PLAN: wyciąć pojedyncze znaczki (siatka 5×5 na arkusz, łatwe do zlokalizowania przez stałe współrzędne) i użyć ich w `stampsRow` ZAMIAST obecnych kolorowych prostokątów + `worldStickerAssetByCountryCode` (stylistyka Travel Passport, inna rodzina wizualna niż plakat) — to bezpośrednio adresuje punkt 5 z listy różnic wyżej ("country stamps kompletnie inne wizualnie"). Do zrobienia: dopasować `countryGroupingDisplayName` do nazw na znaczkach (mogą się różnić pisownią/wielkością liter). User zapowiedział: "do srody zrobie caly swiat" — wygeneruje analogiczne arkusze dla WSZYSTKICH kontynentów (nie tylko Europy) przed środową sesją, więc pełne globalne pokrycie powinno być gotowe na start pracy.
+
+**Koniec sesji na dziś (07.09.2026) — kontynuacja w środę.**
+
+## 09.09.2026 — wycięte 215 unikalnych znaczków krajów (cały świat) do `stampsRow`, gotowe w Assets.xcassets
+
+User dostarczył 9 dodatkowych arkuszy (Missing Countries ×2 warianty, Africa 1/2, Africa 2/2, Americas & Oceania 1/2 i 2/2, Asia 1/2, Asia 2/2 ×2 warianty) plus wcześniejsze 2 arkusze Europy — łącznie 11 źródłowych plików PNG w Downloads. Zadanie: wyciąć KAŻDY pojedynczy znaczek kraju, ciasno przy obwódce (bez marginesu papieru), bez duplikatów, z pełnym pokryciem wszystkich krajów.
+
+**Metoda.** Ręczne wycinanie 200+ znaczków nie wchodziło w grę, więc zbudowany został skrypt Python (`cv2`+`numpy`, `/tmp/.../scratchpad/{crop_lib.py,sheets_data.py,run_crop.py}`): geometryczny szablon siatki (nagłówek ~173px, stopka ~190px, wysokość wiersza = dostępna przestrzeń / liczba wierszy) do przybliżonego położenia każdej komórki, plus lokalne dopasowanie (`refine_crop`) które w oknie wokół przybliżonej pozycji znajduje NAJBLIŻSZY środkowi spójny blob (connected component) zamiast sumy wszystkich pikseli różnych od tła — dzięki temu sąsiednie znaczki nigdy się nie zlewają nawet przy hojnym marginesie wyszukiwania. Przy niskim kontraście obwódki (2 przypadki: Katar, Singapur) automatyczny fallback próbuje kolejno niższe progi kolorystyczne aż znajdzie realny blob.
+
+**Ważne pułapki złapane po drodze (wszystkie naprawione przed finalnym uruchomieniem):**
+- **Błędne przypisanie plik→zawartość.** Kolejność 9 wklejonych obrazków w wiadomości NIE odpowiadała kolejności 9 ścieżek źródłowych wypisanych na końcu tej samej wiadomości — 3 pliki (Asia 1/2, Asia 2/2 z Jemenem, wariant Missing Countries) miały pomyloną tożsamość. Złapane dopiero po tym, że wycięty "palestine.png" zawierał w rzeczywistości Turkmenistan. Naprawa: każdy z 11 plików otwarty i zweryfikowany wizualnie z osobna przed finalnym uruchomieniem.
+- **Niepełne ostatnie wiersze czasem "pożyczają" siatkę wiersza powyżej (lewostronnie wyrównane), a czasem mają WŁASNY, przeliczony na nowo pitch** — nie ma jednej reguły. Potwierdzone pixelowo osobno dla każdego przypadku: Missing Countries wiersz 3 (Marshall/Solomon/Timor-Leste, 3 z 6) i Africa 2/2 wiersz z Tanzania–Zimbabwe (6 z 8) obie POŻYCZAJĄ siatkę sąsiada; Africa 2/2 ostatni wiersz (Western Sahara...Diego Garcia, 7) i Asia z Jemenem ostatni wiersz (sam Jemen, 1) mają WŁASNY pitch. Błędne założenie objawiało się jako przesunięcie o jedną kolumnę w łańcuchu (np. wpis "zambia.png" zawierał w rzeczywistości Zimbabwe) — złapane przez ręczny przegląd sąsiadujących wyników, nie przez samą kontrolę rozmiaru.
+- **Podwójny panel Europy ma inny (krótszy) nagłówek niż arkusze jednopanelowe** — uniwersalny wzór wysokości wiersza nie pasował, Vatican City lądowało w dekoracyjnym tekście stopki. Naprawione osobną, zmierzoną bezpośrednio stałą dla wariantu dwupanelowego.
+
+**Wynik: 215 unikalnych krajów/terytoriów, zero duplikatów (potwierdzone też przez porównanie md5 wszystkich 215 plików — każdy inny).** Automatyczne wykrywanie duplikatów złapało transkontynentalne powtórki (Cypr, Gruzja, Turcja występują i na arkuszu Azji, i Europy — wzięte raz) oraz Kosowo (już było na arkuszu Missing Countries, więc osobny arkusz Europy z Kosowem nie był nawet potrzebny). Dwa w pełni zduplikowane arkusze (drugi wariant Missing Countries, 6-kolumnowy wariant Asia 2/2 bez Jemenia) pominięte w całości.
+
+**Skopiowane do `Assets.xcassets`** jako 215 nowych imagesetów `CountryStamp<NazwaKraju>` (np. `CountryStampJapan`, `CountryStampCoteDIvoire`), każdy z własnym `Contents.json` w standardowym formacie tego projektu. Mapowanie kraj→nazwa assetu zapisane w `stamps_cut/country_to_asset_name.json` w scratchpadzie sesji (do przeniesienia przy właściwym podpięciu pod `stampsRow`). **Jeszcze NIE podpięte pod kod** — to celowo odłożone do właściwej przebudowy kompozycji plakatu (patrz TODO wyżej: najpierw porównanie CURRENT vs REFERENCE, dopiero potem zmiany w `TravelJourneyPosterView.swift`). Nie robiony był build Xcode po tej zmianie (tylko assety, zero zmian w `.swift`) — do zweryfikowania przy najbliższym buildzie.
+
+## 09.09.2026 (ciąg dalszy) — trzy realne bugi zgłoszone przez usera, wszystkie naprawione PRZED powrotem do plakatu
+
+**Bug 1 — kasowanie `PlannedTrip` OD RAZU po tapnięciu "Create Memory", zanim user cokolwiek zapisał.** User zgłosił: wizyta w Braszowie zniknęła bezpowrotnie, bo nie chciał wtedy tworzyć memories. Przyczyna: `HomeView.convertPlannedTrip` i `TripPlanningView.PlannedTripDetailView.convert()` obie kasowały `PlannedTrip` NATYCHMIAST, jeszcze PRZED jakąkolwiek akcją usera — samo wyjście z ekranu ("po prostu nie chciałem nic tworzyć") traciło dane bezpowrotnie.
+
+**Bug 2 (ten sam dzień, dogłębniejszy) — "Create Memory" myląco prowadził do Travel Map, nie do Studio.** User: "przy create memoriec powinno Cie przeniesc do studio nie do mapy". Naprawa obu bugów naraz: usunięty CAŁY mechanizm prefillu Travel Map (`pendingTravelMapPrefillStops`, `TravelMapView.pendingPrefillStops` — martwy kod po zmianie, usunięty). Nowy przepływ: "Create Memory" (Welcome back / Trip Planning) otwiera zwykły `PhotosPicker` (pełna biblioteka, BEZ filtrowania po dacie — user explicite: "jak bedzie wybierac zle zdjecie nie bedziemy sie z tym bawic", czyli świadomie bez zgadywania appki). `PlannedTrip` kasowana DOPIERO w `HomeView.loadSelection`, PO faktycznym utworzeniu `SavedProject` — wyjście z pickera przez Cancel zostawia podróż nietkniętą. `TripPlanningView` przekazuje tylko ID przez `selectedTab = .home` + `pendingCreateMemoryFromPlannedTripID`, bo nie ma bezpośredniego dostępu do stanu Home.
+
+**Odzyskiwanie Braszowa — WAL forensics, bez dotykania żywej bazy.** `devicectl device copy from` (tylko odczyt) → plik `default.store-wal` sparsowany ręcznie w Pythonie (format WAL: 32B nagłówek + ramki 24B nagłówek+strona) → zrekonstruowane 35 migawek bazy (jedna per commit) → binarne przeszukanie wstecz aż do ostatniej migawki gdzie `PlannedTrip` "Romania" jeszcze istniał (frame 280, tuż przed frame 296 gdzie już zniknął). Odzyskane WSZYSTKO: tytuł, daty (2–8 wrz), koszty (GBP, lot £250, inne £50), oba przystanki (London Luton, Braszów — nocleg "Acasa la mama"/familyFriends) i 5 Places to Visit (Bran Castle, Dracula Restaurant, Coresi shopping centre, Panoramic restaurant, City centre, wszystkie "visited"). Przywrócone przez JEDNORAZOWY kod w apce (`HomeView.restoreRomaniaTripIfNeeded`, normalne SwiftData `modelContext.insert`, ten sam `id` co oryginał dla idempotencji) — potwierdzone przez usera że wróciło, kod usunięty zaraz po. WAŻNA UWAGA na przyszłość: `sqlite3 <plik>` otwarty NORMALNIE (nie `-readonly`/`immutable=1`) potrafi przy zamknięciu automatycznie checkpointować i WYCZYŚCIĆ WAL — pierwsza kopia w scratchpadzie padła tak przez własne zapytania diagnostyczne, druga kopia (z `chmod 444`) przetrwała i posłużyła do odzysku.
+
+**Serwer Share nietknięty przez cały ten bug.** Sprawdzone bezpośrednio (`curl https://pmemories.duckdns.org/pmemories/api/trips/1takMRrLmQ`, `HTTP 200`) — kasowanie było czysto lokalne (SwiftData), nigdy nie dotknęło serwera. Narzeczona usera straciła TĘ SAMĄ podróż tym samym bugiem na swoim telefonie — zamiast fizycznego dostępu do jej urządzenia, user po prostu udostępni jej ponownie swoją (już odzyskaną) kopię z Trip Planning → nowy link → ona zaimportuje świeżą kopię z serwera.
+
+**Bug 3 — karta "Welcome back" blokowała pokazanie kolejnej, nadchodzącej podróży.** User miał kolejną podróż za 9 dni, ale `HomeView.featuredPlannedTrip` miał TYLKO jedno miejsce na Home i `justCompleted` (Welcome back) miał bezwarunkowe pierwszeństwo przed nadchodzącymi — user nie mógł się pozbyć karty Rumunii bez tworzenia filmu, więc nadchodząca podróż nigdy się nie pokazywała. Naprawa: nowe pole `PlannedTrip.isMemoryPromptDismissed` (ten sam duch co `SavedStop.isHiddenFromOnThisDay`) + mały X w rogu karty "Welcome back" (dokładnie ten sam wzorzec co X na karcie "On This Day" — `ZStack(alignment: .topTrailing)`, `Button` osobno od `.onTapGesture` na reszcie karty). X chowa TYLKO przypomnienie — sama podróż zostaje w pełni widoczna/edytowalna w Trip Planning. `featuredPlannedTrip` teraz pomija wyciszone podróże przy szukaniu kandydata do pokazania.
+
+**Bug 4 (zgłoszony, naprawiony) — wyszukiwanie szczytów po nazwie w ogóle nie działało.** Wcześniej dziś dodany przycisk "Search for a peak" (odpowiedź na: "nie mozna wybrac na liscie szczytow jesli sie chodzi po gorach... dzien pozniej sie chce stworzyc mape") używał tego samego zapytania Overpass co wykrywanie po GPS, tylko bez promienia `around:`. User: "i szczyty sie nie wyszukuja". Przyczyna sprawdzona bezpośrednio (`curl` do publicznego Overpass): `"remark": "runtime error: Query timed out"` — szukanie PO NAZWIE bez ograniczenia geograficznego to skan całej planety, Overpass ma indeks przestrzenny a nie tekstowy, publiczny serwer zawsze się na tym wykłada. Naprawione: przełączone na Nominatim (`nominatim.openstreetmap.org/search`, ten sam ekosystem OSM, ale ma własny indeks tekstowy do szukania po nazwie) — filtrowane do `class=natural`/`type=peak`, kraj/kod kraju od razu z odpowiedzi (`address`), bez osobnego reverse-geocode. Potwierdzone ręcznie (`curl`) że "Rysy" teraz zwraca prawidłowy wynik.
+
+Wszystkie 4 buggi + odzysk Braszowa potwierdzone przez usera na żywym urządzeniu ("ok super"). Nowy plik: `PeakSearchView.swift` (wymagał `xcodegen generate` przed buildem, jak zawsze przy nowym pliku `.swift`).
+
+**Kontynuacja plakatu "My Travel Journey" — wciąż czeka**, patrz TODO wyżej (porównanie CURRENT vs REFERENCE, potem przebudowa kompozycji).
+
+## 09.09.2026 (wieczór, ciąg dalszy) — pierwsza faktyczna runda przebudowy plakatu, po systematycznym porównaniu z referencją
+
+User wysłał referencyjny mockup jeszcze raz (poprzedni zgubiony w kompaktowaniu kontekstu) — zrobione systematyczne porównanie element-po-elemencie (nagłówek, mapa, zdjęcia, statystyki, znaczki, stopka), zapisane jako punkt wyjścia przed jakimkolwiek kodem, zgodnie z zasadą usera. Największe różnice: mapa ilustrowana vs prawdziwy zrzut satelitarny (świadomie NIE podmienione — zostają prawdziwe, dokładne pinezki), zdjęcia mniejsze z podpisem pismem odręcznym NA papierze (nie w białej ramce polaroidu), znaczki małe/płaskie/gęste (NIE duże karty z cieniem) — to ostatnie dokładnie w stylu 215 znaczków wyciętych wcześniej dziś.
+
+**Zrealizowane w tej rundzie:**
+- **Znaczki krajów podmienione na nowy zestaw.** Nowy plik `JourneyStampAssets.swift` — słownik kod-kraju → `CountryStamp*` (204 wpisy, wygenerowany programowo przez dopasowanie znormalizowanej nazwy do istniejącego `worldStickerAssetByCountryCode`, żeby nie przepisywać ręcznie 200+ kodów ISO). Znaczki z nowego zestawu idą na canvas BEZ dodatkowej ramki (już mają własną, wypaloną w pikselach) — stary `worldStickerAssetByCountryCode`/flaga emoji zostają jako fallback dla ~15 drobnych terytoriów spoza wyciętych arkuszy.
+- **Prawdziwe logo appki w nagłówku** (user: "nasze logo musi widniec na gorze") — `AppLogoMark` (już istniało w Assets.xcassets, ten sam co ikona appki) zamiast generycznej ikonki aparatu, tło/obwódka w delikatnym gradiencie niebiesko-fioletowym echującym kolory samego logo (user: "w napisie nie mamy zadnych kolorow... bardziej ciekawsze rozwiazanie a nie tylko na bialym kolku").
+- **Kolor w tytule bez psucia lokalizacji.** Referencja koloruje konkretne angielskie słowo ("My" na czerwono) — tytuł idzie przez `L(...)` (27 języków), więc dzielenie po angielskich słowach zepsułoby szyk w innych językach. Zamiast tego: cały tytuł w cieplejszym, bogatszym kolorze (bordowy zamiast płaskiego brązu) + prawdziwy samolocik z przerywaną smugą przelatujący obok (`titleFlourish`) — dodaje charakter bez założeń o strukturze zdania.
+- **Znaczki w jednym gęstym rzędzie** (user: "wszystkie te kraje co odwiedzilem spokojnie sie zmiesci kolo siebie") — limit kolumn podniesiony z 7 do 20, żeby typowa liczba krajów (14 u usera) mieściła się w jednym rzędzie zamiast łamać na 2-3.
+- **Audyt wszystkich 215 wyciętych znaczków, 5 realnych błędów naprawionych.** User złapał wizualnie 2 (Northern Ireland — pasek tła po lewej, plus ogólne "to nie jedyna"). Zbudowany automatyczny detektor (porównanie nasycenia koloru 4 krawędzi każdego znaczka — prawdziwa kolorowa obwódka ma wysokie nasycenie, tło-papier ma niskie) — dwie rundy (szeroka + wąska), każdy kandydat zweryfikowany wizualnie z bliska PRZED naprawą (pierwsza runda: 10 kandydatów, tylko 4 prawdziwe; druga runda: 7 kandydatów, wszystkie fałszywe alarmy — cienkie obwódki naturalnie mają nieco niższe nasycenie przy antyaliasingu, to nie błąd). Naprawione: Northern Ireland i Mali (zbędny pasek tła przycięty ręcznie po znalezieniu dokładnej granicy piksel-po-pikselu), Niue/American Samoa/New Caledonia (odwrotny problem — ucięta górna obwódka, przycięte ZA ciasno, poprawione przez przesunięcie okna przybliżonego wycinka i ponowne uruchomienie dopasowania).
+- **`looksLikeAirport()` rozszerzone o listę znanych nazw miejscowości-węzłów lotniczych** (gatwick, heathrow, luton, stansted, southend, schiphol, orly, fiumicino, changi, narita, haneda) — poprzedni filtr łapał tylko dosłowne "airport"/"lotnisko" w nazwie, więc "Gatwick" (prawdziwe miasteczko, appka geokoduje przystanek lotniska pod tą nazwą) przechodził bez przeszkód. UWAGA: sama ta zmiana NIE naprawia realnego przypadku usera — jeśli dana podróż nie ma ŻADNEGO INNEGO przystanku ze zdjęciem, kod i tak spada z powrotem na lotnisko (`pool = realDestinations.isEmpty ? tripStopsWithPhoto : realDestinations`), więc prawdziwym rozwiązaniem jest poniższa funkcja ręcznej podmiany.
+- **Nowa funkcja: ręczna podmiana zdjęcia na plakacie.** User: "musi byc opcja wybierania zdjec... powinnismy miec opcje zmiany jesli nam sie ono nie podoba". Nowy przycisk w toolbarze (`photo.badge.plus`) otwiera `PosterPhotoCustomizationView` (nowy plik) — lista aktualnych 5 slotów (miniaturka + podpis), każdy z przyciskiem "Change" (`PhotosPicker`, cała biblioteka). Wybór ZAPISUJE się trwale w `UserDefaults` (`travelJourneyPosterPhotoOverrides`, słownik kod-kraju → `PHAsset.localIdentifier` — świadomie NIE SwiftData, to tylko preferencja wyświetlania plakatu, nie prawdziwe dane podróży) i natychmiast przelicza `loadPolaroids()`+`renderPosterImage()`. WAŻNE: podmienia TYLKO zdjęcie, nigdy miejsce/kraj/podpis (te zostają prawdziwe, z danych podróży) — zero fabrykowania danych. `PolaroidPhoto` dostał nowe pole `code` (kod grupowania kraju) jako klucz do słownika podmian; nowy protokół `PosterPolaroidDescribable` (osobny plik) pozwala `PosterPhotoCustomizationView` widzieć prywatny `PolaroidPhoto` bez zmiany jego dostępności gdzie indziej.
+
+**Wciąż otwarte / do zrobienia:**
+- Mapa dalej jest prawdziwym zrzutem Apple Maps (nie ilustracją) — świadomie zostawione, planowane sepiowanie/vintage-tinting zamiast podmiany na fejkową grafikę (zachowuje prawdziwe pinezki).
+- Podpisy zdjęć wciąż w białej ramce polaroidu, nie pismem odręcznym na papierze jak w referencji.
+- Dodatkowe rozrzucone elementy dekoracyjne z referencji (kompas NA canvasie a nie tylko w nagłówku, odręczne notatki z serduszkami, wystający fragment paszportu/drugiej warstwy papieru, dodatkowe tagi/pieczątki przy stopce) — jeszcze nie dodane.
+- User przysłał też 4 dodatkowe arkusze z ramkami na zdjęcia (Polaroid/Torn Paper/Round/Postcard/Film Strip/Travel Ticket) i przykładowymi tłami — NIE zapisane jako pliki (brak dostępu, user musi wrzucić do Downloads jak poprzednie), więc jeszcze nie wykorzystane.
+
+## 10.09.2026 — druga runda audytu znaczków: zmiana METODY, nie tylko ponowne sprawdzenie
+
+User (słusznie) naciskał dalej po pierwszej rundzie napraw: "wez to przepatrz jeszcze raz albo zmien metode sprawdzania na inna... nie powinno byc problemu wyciecia kwadrata... jedynie ze sa roznej wielkosci". Realny insight potwierdzony pomiarem: w obrębie JEDNEJ linii siatki źródłowego arkusza (gdzie geometria wymusza identyczny rozmiar komórki) wysokości wyciętych znaczków były bardzo spójne (±1-2px), ale SZEROKOŚCI różniły się nawet o ~20px (np. Afryka 1/2 rząd 0: 167-187px) — to `refine_crop` (dopasowanie do wykrytego kontenera koloru) samo w sobie wprowadzało niespójność, mimo że każdy pojedynczy wynik osobno wyglądał na "prawidłowo przycięty".
+
+**Nowa metoda (dokładnie to, o co poprosił user — zmiana podejścia, nie kolejny ręczny przegląd):** dla każdej grupy (ten sam arkusz źródłowy + ten sam wiersz siatki) policzona MEDIANA szerokości/wysokości ze wszystkich dotychczasowych wycinków, potem każdy znaczek w grupie ponownie wycięty z ORYGINALNEGO arkusza w tym samym, wymuszonym rozmiarze (mediana), wyśrodkowany na dotychczas wykrytym środku. 5 znaczków naprawionych w poprzedniej rundzie (Northern Ireland, Mali, Niue, American Samoa, New Caledonia) świadomie POMINIĘTE w nadpisywaniu (już zweryfikowane ręcznie, nie ryzykować cofnięcia naprawy przez medianę z grupy), ale WLICZONE do obliczenia mediany (jedna wartość na grupę 6-8 nie zaburza mediany). Wynik: 190/215 znaczków przycięte na nowo, wszystkie grupy mają teraz IDENTYCZNY rozmiar w obrębie wiersza (np. Afryka 1/2 rząd 0: wszystkie 178×154, zero rozrzutu).
+
+Po normalizacji: ponowny automatyczny skan (nasycenie koloru 4 krawędzi) złapał 14 nowych kandydatów, każdy zweryfikowany ręcznie z bliska (zoom 5×) — WSZYSTKIE 14 to fałszywe alarmy (cienka obwódka + naturalnie mniej nasycone tło ilustracji tuż przy krawędzi, nie prawdziwy wyciek/ucięcie). Zero nowych defektów wprowadzonych przez normalizację. Backup przedoperacyjny w scratchpadzie sesji (`stamps_cut_backup_before_normalize`) na wypadek potrzeby porównania/cofnięcia.
+
+Wszystkie 215 skopiowane ponownie do `Assets.xcassets`, build+install potwierdzone.
+
+## 10-11.09.2026 — koniec walki ze starym zestawem znaczków: user znalazł DUŻO lepsze źródło
+
+Po normalizacji rozmiaru (wyżej) user dalej znajdował realne defekty przez ręczne oglądanie na telefonie (Northern Ireland niedocięty dół, potem Palau i Cabo Verde — pasek tła PO CAŁEJ jednej krawędzi, nie tylko w rogu) — słusznie zauważył: "wszystkie te nie sa poprawnie wyciete... to juz twoja robota", "nie powinno byc problemu wyciecia kwadrata... jedynie ze sa roznej wielkosci". W odpowiedzi zbudowany kontrolny arkusz kontaktowy (wszystkie 215 znaczków na jaskrawym zielonym tle, żeby każdy defekt był natychmiast widoczny) — realna metoda QA na dużą skalę, zamiast zgadywania przez heurystyki koloru (te dawały mnóstwo fałszywych alarmów, np. cienkie/jasne niebo przy krawędzi cały czas wywoływało alarm mimo poprawnego wycięcia).
+
+W międzyczasie eksperyment z **przezroczystością tła** znaczków (zewnętrzna rada AI, przekazana przez usera: "nie każ mu tylko wyciąć tło, bo zacznie kombinować z wyglądem" — user podał gotowy, precyzyjny prompt po angielsku). Pierwsza próba (flood-fill po kolorze od rogów) katastrofalnie "wyciekała" w środek pieczątki tam gdzie niebo/tło ilustracji było jasne (Iraq, Lebanon, Togo, Colombia — całe niebo znikało). Naprawione geometryczną maską zaokrąglonego prostokąta (bez analizy koloru w ogóle, więc zero ryzyka wycieku) — zadziałało niezawodnie wszędzie.
+
+**Przełom — user: "sprawdz czy to nie bedzie latwiej wyciagnac ze strony", wysłał nowe arkusze Europy.** Nowe pliki (wygenerowane inaczej niż stare 9 arkuszy) mają PRAWDZIWY kanał alfa (potwierdzone przez PIL: `alpha.getextrema()` = (0,254), nie płaski RGB z wypaloną szachownicą jak poprzednio) — KAŻDY znaczek ma WŁASNY, indywidualny kształt (sześciokąt, koło, owal, tarcza, zaokrąglony prostokąt), nie sztywną siatkę identycznych prostokątów. Wyciąganie przez wykrywanie spójnych obszarów (`cv2.connectedComponentsWithStats`) NA KANALE ALFA (próg alpha>30, filtr powierzchni >2000px) — zero zgadywania geometrii siatki, zero heurystyk koloru, zero ryzyka wycieku w środek ilustracji. Rezultat z 2 arkuszy "Europe 1/2"+"2/2": 35 + 22 wykrytych obszarów, po odjęciu plakietki "EUROPE X/2", 4 drobnych artefaktów (nie prawdziwe znaczki) i 7 duplikatów między arkuszami (Malta, Moldova, Monaco, Montenegro, Netherlands, North Macedonia, Norway wystąpiły na obu) → **48 unikalnych, idealnie wyciętych znaczków Europy**, każdy zweryfikowany wizualnie na arkuszu kontaktowym.
+
+**Decyzja: przebudować CAŁY zestaw na tej metodzie, nie łatać starego.** User: "tak jesli to bedzie ok to je dostarcze" — zapowiedział wysłanie analogicznych arkuszy (prawdziwa przezroczystość, indywidualne kształty) dla reszty kontynentów. Stary zestaw 215 (`JourneyStampAssets.swift` + `CountryStamp*.imageset`) **zostaje podłączony i działający w międzyczasie** (nic nie jest zepsute), ale docelowo ma zostać CAŁKOWICIE zastąpiony nowym zestawem, nie scalony.
+
+**TODO na następną sesję:**
+1. Czekać na kontynenty od usera (Afryka/Azja/Ameryki/Oceania w NOWYM formacie — prawdziwa przezroczystość, indywidualne kształty, jak Europa).
+2. Dla każdego nowego arkusza: ta sama metoda ekstrakcji (`cv2.connectedComponentsWithStats` na kanale alfa, próg alpha>30, filtr area>2000, przycięcie z zachowaniem alfa) — kod do napisania na nowo/odtworzenia z opisu wyżej (nie zapisany w projekcie, tylko w scratchpadzie sesji która się kończy: `/private/tmp/claude-501/.../scratchpad/new_stamps_extracted/`, `new_stamps_src/`).
+3. Deduplikacja między arkuszami PO NAZWIE kraju (jak w Europie — 7 duplikatów wyłapanych automatycznie).
+4. Zbudować kompletny nowy zestaw (docelowo zamiennik `CountryStamp*`), podłączyć pod `stampsRow` w `TravelJourneyPosterView.swift` (prawdopodobnie bez własnej ramki/obwódki tak jak teraz — nowe znaczki już mają wszystko wypalone, w tym różne kształty, więc LazyVGrid może wymagać dostosowania do NIE-jednolitych proporcji poszczególnych znaczków).
+5. Po zbudowaniu nowego zestawu: skasować stary `JourneyStampAssets.swift` + 215 `CountryStamp*.imageset` (na razie zostają, żeby nic nie zepsuć w międzyczasie).
+6. Wciąż otwarte z wcześniejszych rund (patrz TODO wyżej): mapa sepiowana/vintage zamiast surowego zrzutu Apple Maps, podpisy zdjęć pismem odręcznym na papierze zamiast w białej ramce polaroidu, dodatkowe rozrzucone elementy dekoracyjne ze stopki referencji (tagi/pieczątki), 4 arkusze z ramkami na zdjęcia (Polaroid/Torn Paper/Round/Postcard/Film Strip/Travel Ticket) wciąż nie wykorzystane.
+
+**Koniec sesji (11.09.2026) — user zamyka czat z powodu szybko zużywającego się limitu, otworzy nowy.**
+
+## 11.09.2026 (nowy czat) — NOWY zestaw znaczków wyekstrahowany, zdeduplikowany i PODŁĄCZONY, build przechodzi
+
+User dostarczył pozostałe arkusze w nowym formacie (prawdziwa przezroczystość): Africa 1/2 + 2/2, Asia 1/2 + 2/2, Americas & Oceania 1/2 + 2/2, oraz osobny pojedynczy znaczek Russia (z wypalonym czerwonym tłem-winietą, nie transparentny). Europe 1/2 + 2/2 były już z poprzedniej sesji.
+
+**Metoda ekstrakcji — ZMIENIONA względem opisu z poprzedniego TODO.** `connectedComponentsWithStats` na samym progu alfa NIE działał: te arkusze mają czyste per-znaczkowe kształty w alfie, ale sąsiednie znaczki stykają się/nachodzą wąskimi „szyjkami", więc próg alfa scalał je w jeden blob (Africa 1/2 → 1 komponent). Erozja też nie rozdzielała (americas2 zostawało 26 zamiast 31 nawet przy erode=21 — realne nakładki, nie same styki). **Zadziałało:** maska alfa>128 → `distanceTransform` → seedy = `dt>35` (jeden seed na znaczek, próg dobrany tak, żeby przejść dla WSZYSTKICH 6 arkuszy naraz) → `cv2.watershed` rozrasta seedy z powrotem do pełnych granic → per-label crop z wyzerowaniem pikseli należących do sąsiada + zachowanie tylko największego spójnego blobu alfy (usuwa drobne okruchy z linii granicznej watershed). Skrypt: `scratchpad/newstamps/{extract2.py,build_all.py,integrate.py}`.
+
+**Nazwy → kolejność.** Dla każdego arkusza ręcznie spisana lista krajów w kolejności czytania (góra→dół, lewo→prawo), zzipowana z blobami posortowanymi w tę samą kolejność. Plakietki kontynentów („AFRICA 1/2" itd.) rozpoznane jako ostatni element i odrzucone. Asia 2/2 ma 5 znaczków z ZEPSUTYM przez AI tekstem (dolny rząd po Türkiye: „CATRHAIS", „KREAHR"…) — odrzucone; brakujące przez to Georgia i Kosowo NIE są w nowym zestawie.
+
+**Wynik: 212 unikalnych znaczków** (211 z watershed + Russia wycięty osobno przez convex-hull jasnego wnętrza + dilate 18px na obwódkę). Dedup po znormalizowanej nazwie, priorytet arkuszy europe1>europe2>africa1…: 13 duplikatów odrzuconych (Malta/Moldova/Monaco/Montenegro/Netherlands/North Macedonia/Norway + UK England/Scotland/Wales/NI wszystkie z europe2; Türkiye z asia2; Antarctica z americas2). QA: wszystkie 212 na jaskrawozielonym arkuszu kontaktowym, cięcia czyste, zero wycieku tła, obwódki całe.
+
+**Podłączenie — ZROBIONE, bez zmian w logice `TravelJourneyPosterView.swift`:**
+- 201 z 212 nowych znaczków mapuje się 1:1 na istniejące kody w `journeyStampAssetByCountryCode` → podmienione PNG-i w istniejących `CountryStamp*.imageset` w miejscu (Contents.json nietknięty). Backup podmienionych oryginałów: `scratchpad/newstamps/replaced_backup/`.
+- 11 nowych: 10 terytoriów zamorskich (Aruba AW, Bermuda BM, Bonaire BQ, Curaçao CW, Falkland Islands FK, French Guiana GF, Puerto Rico PR, Saint Barthélemy BL, Saint Martin MF, Saint Pierre and Miquelon PM) → nowe imagesety + 10 nowych linii w `JourneyStampAssets.swift`. Galápagos wycięty ale bez wpisu (nie ma kodu ISO; podróże na Galapagos i tak grupują się pod EC=Ecuador).
+- Georgia / Kosovo / American Samoa: zostają STARE PNG-i (nowy zestaw ich nie ma), wpis w dict dalej się rozwiązuje — do regeneracji jak user zrobi arkusz.
+- **NIE kasowano** starego zestawu — bo `JourneyStampAssets.swift` i wszystkie `CountryStamp*.imageset` i tak nigdy nie były w gitcie (untracked), więc „stary" = to samo co podmieniamy. Zostają też ~15 imagesetów terytoriów spoza arkuszy (AscensionIsland, CookIslands, Réunion…) w starym stylu — nieszkodliwe, dict ich nie rusza.
+
+**Build: `xcodebuild ... -sdk iphonesimulator26.5` → BUILD SUCCEEDED**, zero błędów, actool skompilował wszystkie 226 imagesetów. NIE instalowane na urządzenie (brak podłączonego telefonu, brak zainstalowanego symulatora) — **do zrobienia: user buduje+instaluje na telefon i ogląda `stampsRow` na plakacie „My Travel Journey"**.
+
+**TODO dalej:**
+1. Weryfikacja wizualna na urządzeniu — czy nowe znaczki dobrze siadają w `stampsRow` (LazyVGrid, teraz różne proporcje/kształty per znaczek — może wymagać dostosowania wysokości komórki / `scaledToFit`).
+2. Georgia + Kosowo (+ ew. American Samoa) — gdy user wygeneruje arkusz w nowym formacie.
+3. Wciąż otwarte z wcześniejszych rund: mapa sepiowana/vintage zamiast surowego zrzutu Apple Maps, podpisy zdjęć pismem odręcznym na papierze zamiast białej ramki polaroidu, dodatkowe elementy dekoracyjne ze stopki referencji, 4 arkusze z ramkami na zdjęcia wciąż nie wykorzystane.
+4. Główny wątek: pełna przebudowa KOMPOZYCJI plakatu względem referencji (8 różnic z listy 07.09) — znaczki to był tylko jeden z punktów.
+
+## 11.09.2026 (ciąg dalszy) — "On This Day" pokazywał lotnisko wylotu z kraju domowego
+
+Nowy zestaw znaczków wgrany na telefon (`devicectl install`, device "Pit"). User przy okazji zgłosił bug na Home: karta **"On This Day"** = "United Kingdom (London Gatwick Airport) — 13 years ago". User: *"co to za podroz 13 lat temu? nic mi to nie mowi jesli lece z anglii i wracam do anglii to nie ma sensu mi to pokazywac ale jesli lece z anglii gdzies i pozniej wracam to lepiej zeby widziec to gdzie lece a nie zkad wylatuje albo wracam"*.
+
+Przyczyna w `TravelTimeMachineProvider.onThisDay(from:)`: stara logika `pool = destinationCandidates.isEmpty ? candidates : destinationCandidates` — gdy jedynym przystankiem pasującym do dzisiejszej daty (miesiąc+dzień) był start/lotnisko (`order == 0`), spadała z powrotem na `candidates` i pokazywała to lotnisko.
+
+**Fix:** pool wybierany teraz tak:
+- `originCode` = `countryGroupingCode` przystanku o najniższym `order` (kraj startu podróży).
+- `tripLeavesOriginCountry` = czy podróż ma JAKIKOLWIEK przystanek w innym kraju niż `originCode`.
+- `foreignCandidates` = kandydaci z `order > 0`, NIE lotnisko (`looksLikeAirport`), kraj ≠ `originCode`.
+- Jeśli `foreignCandidates` niepuste → to jest pool.
+- Wpp. jeśli `tripLeavesOriginCountry` → **`continue`** (pomiń podróż — dzisiejsza data trafiła tylko w lotnisko / leg powrotny wyjazdu zagranicznego, to nie wspomnienie z celu).
+- Wpp. (podróż w całości krajowa) → pool = kandydaci `order > 0` i nie-lotnisko; jeśli pusto, `continue`.
+
+`looksLikeAirport` + lista `knownAirportOnlyNames` przeniesione z prywatnej kopii w `TravelJourneyPosterView` do `TravelAchievementsCalculator` (jedno miejsce, poster teraz woła współdzielone). Build device → **BUILD SUCCEEDED**, wgrane na "Pit". User potwierdził: *"pieknie o to chodzilo"*.
+
+## 11.09.2026 (ciąg dalszy) — próba przywrócenia ramek `PremiumBadge*` COFNIĘTA
+
+User: *"ramki do awatara da sie jes zrobic... sprawdz czy da sie ladnie ramki odkleic"* — zinterpretowane jako „wyczyść welon w środku wycofanego 06.09 zestawu `PremiumBadge*` i wróć go do pickera". Zrobione (skrypt `scratchpad/frames/clean.py` — koło wpisane w prześwit, zaostrzona alfa; 56 PNG-ów podmienione, tabela `premiumBadgeHoleRectByRawValue` przepisana, 2 sekcje w `AvatarFrameView`, build+install). **User: *"nie tak, usuwaj to co teraz zrobiles, chyba nie wyrazilem sie jasno"* — wszystko cofnięte** (PNG-i przywrócone z `scratchpad/frames/frames_backup_original/`, `AvatarFrame.swift` + `AvatarFrameView.swift` z powrotem do stanu sprzed sesji). Potem sprawdzenie samej ekstrakcji (welon 6–11% → 1.5–3.4% półprzezroczystych) pokazane userowi. User: *"ok nie ruszaj ogarne nowe"* — zestaw `PremiumBadge*` dalej wycofany z pickera, czeka aż user dostarczy nowe assety.
+
+## 11.09.2026 (ciąg dalszy) — PosterKit: wycięte elementy do plakatu (dekoracje + ramki na zdjęcia)
+
+User dostarczył 9 arkuszy AI: 1× „Photo Frames Collection 1/4" (ramki na zdjęcia — polaroid, koło, serce, chmurka, taśma filmowa, znaczek pocztowy, trójkąt, zdobiona etykieta, złota rama, airmail, podarty papier, segregator, narożniki) + 8 arkuszy dekoracji travel-scrapbook (aparaty, kompasy, globusy, mapy, walizki, paszport, koperty, pocztówki, bilety, znaczki, zawieszki, washi tape, spinacze, pinezki, liście, sznurki, lupa, lornetka, klucze, samoloty, stemple, papiery). User: *„dodatkowa dekoracja tez to ogarnij zeby juz bylo i umiesc jak bedzie sie tworzyc plakat"*.
+
+Wszystkie 9 arkuszy w **czystym formacie** (elementy pojedynczo na przezroczystości, ramki mają już wycięty otwór na zdjęcie) — ten sam co udane arkusze znaczków krajów.
+
+**Zrobione:** `PosterKit/_extract_deco.py` (alpha>100 → connected components → filtr rozmiaru → watershed split dla sklejonych blobów → ciasny crop RGBA + największy spójny blob alfy). **253 elementy** wycięte, po arkuszu w `~/Desktop/PMemories iPhone/PosterKit/{frames,deco1..deco8}/`, każdy folder z `_contact.png` (podgląd) + `README.md` z opisem i listą rzeczy do dopracowania.
+
+**Stan: NIE podpięte do Xcode.** Placement do kompozycji plakatu → dopiero przy przebudowie `TravelJourneyPosterView.swift`. Do dopracowania przy użyciu (nie teraz): arkusz `frames/` ma 3 sklejone grupy do rozdzielenia (polaroid+tamborek+liście, chmurka+segregator+kółko, serce+serduszko) i 5 nie-ramek do pominięcia (logo, baner, tag „1/4", klaster aparat+kompas, paszport+karta pokładowa). `deco1`–`deco8` wyszły czysto bez sklejek. Ramki: pełne pokrycie po arkuszach 2/4–4/4 (user dostarczy).
+
+## 11.09.2026 (ciąg dalszy) — mapa plakatu: prawdziwa sieć podróży zamiast fikcyjnej ciągłej trasy
+
+Po pytaniu o stan plakatu user zapytał: *"czy mapa moze pokazywac rzeczywista siec podrozy?"*. Sprawdzony `flightPathOverlay`/`renderMapSnapshot` w `TravelJourneyPosterView.swift` — **realny bug**: `coordinates = savedTrips.flatMap(\.stops)` spłaszczał przystanki ze WSZYSTKICH podróży do jednej listy, a linia trasy łączyła je WSZYSTKIE po kolei jedną ciągłą, przerywaną linią — łącznie z odcinkiem między ostatnim przystankiem jednej podróży a pierwszym zupełnie innej (fikcyjny "lot", którego nigdy nie było). Dodatkowo `trip.stops` to surowa relacja SwiftData bez gwarancji kolejności — nawet trasa POJEDYNCZEJ podróży mogła się zygzakować losowo zamiast iść w kolejności zwiedzania.
+
+User potwierdził kierunek naprawy, dodał: *"nie musza pisac miejsca wystarczy pineski polaczone liniami ale zeby te pineski byly dokadnie w miejscach gdzie sie bylo"* — bez podpisów miejsc, pineski dokładnie na realnych współrzędnych.
+
+**Fix:** `renderMapSnapshot()` teraz sortuje przystanki KAŻDEJ podróży po `order` osobno (`orderedTrips`) i zwraca dodatkowo `routePaths: [[CGPoint]]` — jedna pod-trasa na podróż, w prawdziwej kolejności zwiedzania. Nowy `@State mapRoutePaths`. `flightPathOverlay` rysuje teraz każdą pod-trasę OSOBNO (`ForEach` po `mapRoutePaths`) — dashe + samoloty per podróż, **nigdy nie łącząc dwóch różnych podróży linią**. Pineski (`mapPinPoints`, wciąż flat lista wszystkich przystanków, dokładne współrzędne ze snapshottera) bez zmian — user nie chciał podpisów, tylko dokładność pozycji.
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit". Do sprawdzenia przez usera: czy mapa na plakacie teraz pokazuje osobne, sensowne trasy per podróż zamiast jednej losowej ciągłej linii.
+
+## 11.09.2026 (ciąg dalszy) — pierwsza runda: PosterKit podpięty do plakatu (ramki na zdjęcia + rozrzucone dodatki)
+
+User: *"super teraz upiekszanie plakatu przez dodatki ktore Ci dalem rozne ramki i inne ozdoby :)"*.
+
+**Ramki na zdjęcia — dokończone i podpięte.** Z arkusza "Photo Frames Collection 1/4" trzy sklejone blob-y (polaroid+tamborek+liście, chmurka+segregator+kółko, serce+serduszko) ręcznie rozdzielone (crop po współrzędnych + dla serca usunięcie czerwonego serduszka progiem koloru) → **13 gotowych ramek**. Dla każdej zmierzony `holeRect` (bounding box faktycznego otworu, ta sama metoda co maski `PremiumBadge*` przy ramkach awatara — składowa alfy niedotykająca krawędzi canvasu).
+
+Nowy plik `PosterFrameStyle.swift`: katalog 13 stylów (`assetName`, `canvasWidth/Height`, `holeRect`, `shape: .rect/.rounded/.circle`) + `View.posterFramed(_:width:)` — zdjęcie pod ramką, przycięte do `shape` w obrębie `holeRect`, ramka na wierzchu. Prostsze niż `PremiumBadge*` (te ramki to cienkie obwódki, nie duże dekoracje nachodzące na środek, więc wystarczy prosty kształt zamiast pikselowej maski).
+
+`PolaroidPhoto` dostał pole `frameStyle` (`PosterFrameStyle.style(forIndex:)`, cykliczne przez 13 stylów wg indeksu zdjęcia). `PolaroidView` przepisany: zamiast płaskiej białej karty + taśma washi → `Image(...).posterFramed(...)`, podpis w kapsułce na papierze POD ramką (kształty serce/koło/chmurka nie mają miejsca na tekst w środku).
+
+**Dodatki — 10 wybranych z `PosterKit/deco1` i `deco7`** (kompas, aparat, gałązka liści, kokarda ze sznurka, mapa świata, paszport, czerwona washi, bilet „TRAVEL", globus, zawieszka kraft) skopiowane jako nowe imagesety `PosterDeco*`. Na razie podpięte 5 z nich (`scatteredDecorations` w `mapSection`) — kompas i gałązka liści lewy róg, aparat prawy dolny róg, kokarda prawy górny róg, czerwona washi jako akcent u góry mapy — stałe pozycje/rotacje w rogach niekolidujących z polaroidami.
+
+**Pułapka po drodze:** pierwszy build device od razu po dodaniu `PosterFrameStyle.swift` → `error: cannot find type 'PosterFrameStyle' in scope` — nowy plik `.swift` nie trafił do targetu, klasyczny brak `xcodegen generate` (patrz stała zasada projektu). Po `xcodegen generate` build przeszedł. Po drodze też jednorazowy timeout `xcodectl`/urządzenia (telefon chwilowo "connecting") — zniknął przy retry, nic nie robiony ręcznie.
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit". Reszta ~228 dodatków i pozostałe 4 ramki (`PosterKit/`) czekają — to pierwsza, ostrożna runda żeby zobaczyć jak wygląda na żywo, nie cała przebudowa kompozycji naraz. TODO dalej: więcej dodatków (jeśli ta runda się spodoba), mapa sepiowana/vintage, podpisy pismem odręcznym, arkusze ramek 2/4–4/4, „Poster Story Engine".
+
+## 11.09.2026 (ciąg dalszy) — pierwsza runda ramek: OSTRA krytyka usera, druga runda napraw
+
+User przesłał zrzut z telefonu + referencyjny mockup jeszcze raz (żeby nie zgubił się w kompaktowaniu). Werdykt: *"to jest tragedia dlaczego ramki sa takie male zdjec prawie nie widac a te znaczki maja bys rozstawione zeby zrobily klimat a nie [bałagan]... widzisz roznice?"* + *"ramki niektore sa obciete zdjecia nie wpasowane do ramek powinny je cale wypelniac od srodka"*.
+
+Systematyczne porównanie (zgodnie z metodą usera z 07.09 — diff najpierw, kod potem):
+1. **Zdjęcia małe względem ramki** — dekoracyjna ramka renderowana w tej samej wąskiej szerokości co poprzednia płaska karta (210pt), więc bogato zdobione ramki (serce, koło z liśćmi) zjadały większość miejsca na dekorację, zostawiając malutki widoczny fragment zdjęcia.
+2. **`PosterFrameHeart` — realny bug.** Automatyczne mierzenie otworu (largest-clear-region-touching-center) nie zadziałało na sercu (dashed border = zewnętrze i wnętrze POŁĄCZONE przez przerwy w kreskowaniu), więc `holeRect` był RĘCZNIE zgadnięty i za mały/źle wycentrowany — zdjęcie nie wypełniało prawdziwego wnętrza serca, widać było puste tło papieru w środku.
+3. **`PosterFrameRound`** — technicznie poprawny `holeRect`, ale duży kiść liści z arkusza WCHODZI na krawędź otworu (tak wycięte ze źródła), więc przy małym rozmiarze wyglądało jak ucięcie zdjęcia.
+4. **Mapa zdominowana przez plamę pinezek** — `mapPinPoints` = KAŻDY przystanek z WSZYSTKICH 28 podróży (dziesiątki, głównie w Europie) zamiast tylko wyróżnionych/sfotografowanych miejsc jak w referencji.
+
+**Fix:**
+- `PosterFrameHeart` i `PosterFrameRound` **usunięte z rotacji** (`PosterFrameStyle.all`) — zostaje 11 stylów z dużym, dobrze zmierzonym otworem, zdjęcie dominuje.
+- Szerokość renderu zdjęcia: 210 → **300pt**.
+- `PolaroidPhoto` dostał pole `coordinate`; `renderMapSnapshot(highlightCoordinates:)` — zasięg/zoom mapy dalej liczony ze WSZYSTKICH przystanków (żeby kadr obejmował cały świat), ale pinezki-markery TYLKO dla współrzędnych wybranych zdjęć (5, nie dziesiątki). `.task` przepisany z `async let` na sekwencyjne (pinezki muszą znać wynik `loadPolaroids()` zanim rzutują na snapshot).
+- Znaczki krajów (punkt 3. z krytyki usera) **świadomie NIE ruszone teraz** — osobny, większy temat wymagający realnego designu koloru/wariacji, nie chciałem zgadywać przy okazji.
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit". Do sprawdzenia: czy zdjęcia teraz dominują nad ramką, czy mapa jest czytelna (5 pinezek zamiast plamy), czy serce/koło z liśćmi faktycznie zniknęły z rotacji bez błędu kompilacji gdzie indziej.
+
+## 11.09.2026 (ciąg dalszy) — trzecia runda: prawdziwe maski kształtu ramek + linie zamiast pinezek + kolizje dekoracji
+
+User przesłał dwa zbliżenia z telefonu (Crop screeny) + kolejny opis: *"zamiast usuwac pineski lepiej bedzie usunac kilka lini z przelotow... zdjecie wystaje za ramke w innej sa przeswity bo jest nie dopasowane inne rakma jest obcieta na gorze"*.
+
+**Diagnoza z zbliżeń — potwierdzony systemowy bug, nie pojedynczy przypadek.** Zbliżenie na ramkę `PosterFrameCloud` (Grecja): dziurawe „okienka" między płatami chmurki pokazują fragmenty zdjęcia POZA właściwym kształtem — bo poprzednia metoda przycinała zdjęcie do `RoundedRectangle` (przybliżenie bounding boxa), a prawdziwy otwór to falisty, wielolistny kształt chmurki. Ten sam mechanizm psuł `PosterFrameLabel`/`PosterFrameGoldOrnate` (zdobione, faliste obwódki) — zdjęcie „wystawało" w wąskich przewężeniach kształtu, gdzie bounding-box-prostokąt jest szerszy niż prawdziwy otwór. Zbliżenie na `PosterFrameFilmstrip` (Adeje): górna krawędź wyglądała na "obciętą" — to NIE ramka, to kokarda ze sznurka (`scatteredDecorations`) nałożona na jej góry, bo pozycje dekoracji liczone były "na oko" jeszcze przy starym, mniejszym rozmiarze zdjęć (210pt), a zdjęcia urosły do 300pt bez przeliczenia kolizji.
+
+**Fix 1 — prawdziwe maski pikselowe zamiast `Rectangle`/`RoundedRectangle`/`Circle`.** Dokładnie ten sam mechanizm co `PremiumBadge*Mask` przy ramkach awatara: dla każdego z 11 stylów wygenerowana (przy okazji wcześniejszego mierzenia `holeRect`) maska = biały wypełniony kształt prawdziwego otworu, czarne tło. 11 nowych imagesetów `PosterFrame*Mask`. `PosterFrameStyle` dostał `maskAssetName`; `posterFramed(_:width:)` przepisany — `holeRect` służy TERAZ tylko do dobrania kadru/zoomu zdjęcia (żeby wypełniło hole, nie cały canvas), a przycinanie kształtu robi `.mask(Image(maskAssetName)...)` w pełnej skali canvasu, nie geometryczne przybliżenie.
+
+**Fix 2 — linie tras, nie pinezki.** User explicite: NIE chciał mniej pinezek, tylko mniej LINII. Cofnięte zawężanie `mapPinPoints` do 5 wyróżnionych (pinezki z powrotem na WSZYSTKICH przystankach, jak przed poprzednią rundą). Zamiast tego `renderMapSnapshot()` filtruje `routePaths` do podróży **międzynarodowych** (`Set` kodów krajów przystanków ≥2) — czysto krajowe wycieczki (kilka miast w jednym kraju) już nie rysują linii, ale WSZYSTKIE ich przystanki dalej mają pinezki. `.task` wrócił do równoległego `async let` (nie musi już czekać sekwencyjnie na `loadPolaroids`, bo pinezki nie zależą od wyboru zdjęć).
+
+**Fix 3 — kolizje dekoracji ze zdjęciami, policzone, nie zgadnięte.** Ręcznie policzone bounding boxy wszystkich 5 zdjęć (teraz 300pt, różne proporcje ramek: Torn/Filmstrip/GoldOrnate/Stamp/Scallop) względem środka `mapSection`, znalezione realne szczeliny między nimi, wszystkie 5 dekoracji przesunięte w te szczeliny + zmniejszone (95→60, 110→75, 90→65, 80→60, 100→75px) żeby dawały mniejszy margines błędu.
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit". Do sprawdzenia: czy zdjęcia teraz idealnie wypełniają kształt każdej ramki (bez prześwitów/wystawania), czy mapa ma mniej linii ale te same pinezki, czy dekoracje nie nachodzą już na żadne zdjęcie.
+
+## 11.09.2026 (ciąg dalszy) — weryfikacja dopasowania zdjęć (matematyka OK) + dekoracje ZDJĘTE z mapy
+
+User, 39 sekund po instalacji poprzedniego builda, zrzut: *"czy ty widzisz jak zdjecia sa niedopasowane do ramek ? one maja wypelniac ramki od srodka !!!!!!!!"*.
+
+**Weryfikacja lokalna (Python, bez telefonu).** Odtworzona DOKŁADNIE ta sama matematyka co w `posterFramed` (fill-crop zdjęcia do `holeRect`, `.mask()` maską otworu, ramka na wierzchu) z jaskrawym testowym wzorem (kratka czerwono-niebieska) zamiast prawdziwego zdjęcia na `PosterFrameGoldOrnate` — **idealne dopasowanie, zero luk, zero wystawania poza kształt**. Matematyka jest poprawna; albo user patrzył na build sprzed poprawki masek (instalacja→zrzut to tylko 39s, appka mogła nie zdążyć się w pełni przeładować/poster mógł być z cache'u `@State` sprzed relaunchu), albo problem jest gdzie indziej (do zweryfikowania na kolejnym, świeżym zrzucie).
+
+**W międzyczasie user przesłał NOWY plik referencyjny** (pusty szablon plakatu z tej samej serii co "Photo Frames Collection") — inna kompozycja niż oryginalny mockup z 05.09: dekoracje (kompas, zawieszki, walizka, liście, polaroidy, góry/las) tworzą **wyraźne OBRAMOWANIE po krawędziach strony**, środek zostaje pusty na treść. Zestawione z tym co miałem na żywej mapie: *"nasza dekoracja jest rozdzucona gdzies na mapie bez kompletnego sensu"*.
+
+**Decyzja: dekoracje ZDJĘTE z `mapSection` całkowicie** (usunięta `scatteredDecorations`, trzecia nieudana próba ręcznego pozycjonowania w szczelinach mapy) — user ma rację, że nawet bezkolizyjne rozrzucenie "na oko" nie ma wizualnej logiki. Docelowo dekoracje powinny iść jako spójne OBRAMOWANIE całego plakatu (jak w nowym wzorcu), nie wypełniacz negatywnej przestrzeni mapy — to osobny, większy temat do zaplanowania, NIE zgadywany teraz pod presją czasu.
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit". Do zrobienia: user robi PEŁNY force-quit + ponowne otwarcie appki (nie tylko powrót z tła) i świeży zrzut całego plakatu, żeby ocenić dopasowanie zdjęć na czysto, bez dekoracji na mapie zaburzających ocenę.
+
+## 11.09.2026 (ciąg dalszy) — KONIEC prób z dekoracyjnymi ramkami na zdjęciach, powrót do kwadratów
+
+User: *"nie bedziemy sie motac z ramkami ktore nie mozemy dopasowac do zdjec wracamy do kwadratowych ktore byly na poczatku"* — decyzja, nie kolejna prośba o poprawkę. Po trzech rundach (mała skala → prawdziwe maski kształtu → wciąż niedopasowanie na żywym urządzeniu, mimo zweryfikowanej lokalnie poprawnej matematyki) user zamyka temat.
+
+**Cofnięte:** `PolaroidView` z powrotem do oryginalnej, prostej kwadratowej karty (220×220, białe tło, cień, prawdziwa taśma washi `TravelJourneyTape` u góry) — dokładnie jak przed całą tą sesją prób z ramkami. `PolaroidPhoto` stracił pola `frameStyle`/`coordinate` (nieużywane teraz). `PosterFrameStyle.swift` i wszystkie importowane assety (`PosterFrame*`/`PosterFrame*Mask`/`PosterDeco*`) **zostają w projekcie nieużywane** (nie usuwane fizycznie — na wypadek gdyby temat ramek/dekoracji wrócił w innej, lepiej zaplanowanej formie), ale nic w kodzie już się do nich nie odwołuje.
+
+Zostają z tej rundy prac nad plakatem: mapa z prawdziwą siecią podróży (linie tylko dla podróży międzynarodowych, pinezki na wszystkich przystankach) — TEGO user nie kwestionował, zostaje.
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit". Plakat wraca do stanu zdjęć jak przed 11.09 (proste kwadratowe karty), reszta (mapa/sieć/statystyki/znaczki) bez zmian względem ostatniej działającej wersji.
+
+## 11.09.2026 (ciąg dalszy) — linia przez podpis (realny bug z-order), logo, dekoracje w nagłówku
+
+**Bug 1 — user: "dlaczego ta linia przechodzi po napisie na zdjeciu?"** Realna przyczyna, nie złudzenie: polaroidy CELOWO wychodzą poza dolną krawędź `mapSection` (offset nie wpływa na wysokość layoutu), ale `statsPlaque` — kolejny element w tym samym `VStack` w `posterContent` — renderuje się PO `mapSection`, więc w SwiftUI maluje się NA WIERZCHU. Jego `strokeBorder` przecinał podpis polaroidu (Cookstown), który akurat nachodził na jego górny margines. **Fix:** `.zIndex(1)` na `mapSection`, trzyma całą mapę razem z overflow'ującymi zdjęciami nad wszystkim co idzie dalej w VStacku.
+
+**Bug 2 — user: "poprawiamy nasze logo w lewym gornym rogu bo wyglada gorzej niz zle".** Przyczyna: `AppLogoMark` to prawdziwa ikonka appki — nieprzezroczysty zaokrąglony kwadrat z WŁASNYM białym tłem wypalonym w pikselach (tak działają ikonki iOS). `originStamp` owijał to DODATKOWO w osobne kółko z własnym gradientem/obwódką — biały kwadrat ikonki był widoczny wewnątrz kółka (podwójne tło), a przy 34pt cały detal (litery P/M, słońce, mewa) zlewał się w nieczytelną plamę. **Fix:** bez opakowania w kółko w ogóle — sama ikonka większa (58pt), zaokrąglone rogi, cień zamiast sztucznego tła.
+
+**Dekoracje — user: "co z nasza dekoracja... trzeba to umiescic zeby wygladalo inaczej".** Po trzech nieudanych próbach wciskania dodatków w gęstą mapę (zawsze kolidowały albo user uznał że "bez sensu") — nowa, INNA strefa: puste marginesy po bokach `header` (stała wysokość, tytuł wyśrodkowany, przy pełnej szerokości 1080pt zostaje sporo pustego miejsca po lewej/prawej stronie tytułu) — jedyne miejsce na plakacie, które nie jest już gęsto wypełnione treścią. `header` przepisany z pojedynczego `VStack` na `ZStack` (`headerContent` = stary VStack bez zmian + 2 dekoracje: gałązka liści lewo, kokarda ze sznurka prawo, obie w wysokości tytułu, poza zasięgiem `originStamp`/`adventureAwaitsStamp`).
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit". Do sprawdzenia: czy linia zniknęła z podpisu, czy logo jest czytelne bez podwójnego tła, czy dekoracje w nagłówku wyglądają sensownie (pierwszy raz poza mapą).
+
+**Ciąg dalszy — podpis pod logo.** User potwierdził logo ("ladniejsze teraz") i przesłał referencyjny wordmark: "PM" w niebiesko-fioletowym gradiencie (te same kolory co logo), "emories" zwykłym ciemnym kolorem, zwykła wielkość liter (nie WERSALIKI jak było). Zaimplementowane przez konkatenację `Text("PM") + Text("emories")` — każdy segment niesie własny `.foregroundStyle` (gradient vs. jednolity kolor), `LinearGradient` na samym tekście (SwiftUI wspiera `ShapeStyle` jako foreground dla `Text`). Build → **BUILD SUCCEEDED**, wgrane na „Pit".
+
+## 11.09.2026 (ciąg dalszy) — build 26 na TestFlight + złapany realny bug Release-only
+
+User: *"wrzucamy builda 24 z tego co sie nie myle"*. Sprawdzone PRZED wykonaniem (nie zgadywane): `build/PMemories_build24.xcarchive` i `_build25.xcarchive` to stare archiwa z **28 i 30 sierpnia** — sprzed całej dzisiejszej roboty (znaczki, On This Day, sieć podróży, logo). User: *"aaa ok tak 26"* po tym jak to pokazałem.
+
+**Sprawdzony, wielokrotnie używany proces** (`project.yml` CFBundleVersion → `xcodegen generate` → `xcodebuild archive` Release → `xcodebuild -exportArchive` → `xcrun altool --upload-app` z hasłem z Keychain `PMemoriesUpload`):
+1. `CFBundleVersion` 25→26 w `project.yml` (`CFBundleShortVersionString` zostaje "1.0.2"), `xcodegen generate`.
+2. `xcodebuild archive` (Release) → **ARCHIVE FAILED**, pierwszy raz od tygodni: `AvatarFrameView.swift:119: value of type 'AvatarFrame' has no member 'maskAssetName'`.
+
+**Realny, wcześniej niezłapany bug — niezwiązany z dzisiejszą sesją.** `AvatarFrame.maskAssetName` (i cała infrastruktura `PremiumBadge*`) istnieje TYLKO w `#if DEBUG` (`AvatarFrame.swift`), ale `AvatarFrameCard.body` w `AvatarFrameView.swift` odwoływał się do `frame.maskAssetName` BEZ analogicznego ograniczenia `#if DEBUG` wokół tej gałęzi — kod kompilował się tylko w Debug. Nikt tego nie złapał wcześniej, bo między buildem 25 (30.08) a dziś NIKT nie robił `xcodebuild archive` (Release) — appka szła tylko na telefon przez `devicectl` (Debug) przez ponad tydzień pracy nad ramkami awatara i innymi funkcjami.
+
+**Fix:** wydzielona `freeStyleAvatar` (stary kod z gałęzi `else`) jako osobny computed property, cała gałąź `if frame.maskAssetName != nil {...} else { freeStyleAvatar }` owinięta w `#if DEBUG ... #else freeStyleAvatar #endif`. Zweryfikowane najpierw szybkim buildem Release na SDK symulatora (bez czekania na pełny archive) — **BUILD SUCCEEDED** — dopiero potem ponowiony pełny archive.
+
+3. `xcodebuild archive` (Release, powtórka) → **ARCHIVE SUCCEEDED**.
+4. `xcodebuild -exportArchive` → `build/export26/PMemories.ipa`, **74.8MB** (vs ~14-16MB poprzednich buildów — skok przez dzisiejsze 212 nowych znaczków krajów).
+5. `xcrun altool --upload-app` — przekroczył 300s (większy plik niż zwykle), automatycznie przeniesiony w tło (ten sam wzorzec co build 14, 06.09). **UPLOAD SUCCEEDED** — 74 775 930 bajtów w 7s (10.6MB/s), Delivery UUID `a5c6377f-1bfa-4c5e-b8db-f7b27ced2dfa`. Build 26 (1.0.2) czeka teraz na przetworzenie w App Store Connect.
+
+## 12.09.2026 — zapisane na później: feedback narzeczonej o skalowaniu plakatu + nowa funkcja: pogoda do dnia wyprawy na szczyt
+
+**Feedback narzeczonej usera, NIE zaimplementowany teraz** (user wkleił długą analizę, zapisuję jako materiał do przyszłej przebudowy kompozycji plakatu, nie działam od razu): kluczowa teza — plakat "My Travel Journey" musi **skalować się danymi, nie gęstością**. Konkretne propozycje:
+- **Mapa**: max 3-5 linii lotów (albo próg: 1-10 lotów→wszystkie, 11-25→top 5, 25+→top 3), max 12-15 pinów — nie próbować pokazać wszystkiego.
+- **Znaczki krajów**: NIE stałe miejsce na pieczątki. Do 12 krajów → pokaż normalnie. 13-25 → ~10-12 + "+N MORE". 25+ → jeszcze bardziej minimalistycznie, sama liczba "80 COUNTRIES" robi wrażenie.
+- **"Rarity Score"** do wyboru KTÓRE znaczki pokazać zamiast pierwszych z brzegu: najrzadsze/unikalne miejsca > najdalsze od domu > różne kontynenty > najdłuższe loty > ulubione > najnowsze. Cel: pokazać "travel bragging rights" (Bhutan/Mongolia/Antarktyda), nie kolejne Francja/Hiszpania/Włochy.
+- Ten kierunek pasuje/rozszerza już wcześniej wspomniany "Poster Story Engine" (07-09.09) — do połączenia przy właściwej przebudowie kompozycji, NIE teraz.
+
+**Nowa funkcja (zaimplementowana): pogoda do dnia wyprawy dla dowolnego przystanku w Trip Planning**, user: *"czy da sie dorzucic do planowanych wycieczek miejsca docelowe szczyty razem z temperatura... jak miejsce docelowe bedzie np rysy zeby pokazywalo nam tem na rysach max do dnia wyprawy"*.
+
+Zakres doprecyzowany (user: "nie" na "każde Place to Visit") — dotyczy **przystanku** (`PlannedStop`, ma już `coordinate`), NIE elementów `PlaceToVisit` (te są zwykłym tekstem bez współrzędnych, świadomie NIE ruszane).
+
+**Realna przyczyna, czemu to wcześniej nie działało dla szczytów:** `CitySearchCompleter` (baza Apple) nie zna małych szczytów typu "Rysy" — user wpisujący nazwę szczytu w polu miasta dostawał tylko `unresolvedLocationHint` ("Tap a suggestion...") i utykał bez możliwości ustawienia lokalizacji.
+
+**Zrobione:**
+- `PlannedStopRow` dostał `peakSearchButton` — widoczny gdy `stop.coordinate == nil`, otwiera `PeakSearchView` (TEN SAM komponent co przy aktywnej podróży w `TravelMapView`, Overpass/Nominatim zamiast bazy Apple) w `.sheet`, ustawia `stop.cityName`/`coordinate`/`country`/`countryCode` bezpośrednio na `PlannedStop` (zamiast tworzyć nowy `TripStop` jak w aktywnej podróży).
+- `TravelTimeMachineProvider.dailyForecasts(at:through:)` — NOWA funkcja, rozszerzenie istniejącej `forecastTemperature` (pojedynczy dzień) na CAŁY zakres dat (Open-Meteo `daily` z `start_date`=dziś, `end_date`=dzień wyprawy). Poza zasięgiem (~16 dni) albo dla dat w przeszłości → pusta tablica, appka nic nie zgaduje (ten sam duch co reszta pogody w appce).
+- Nowy plik `TripWeatherStrip.swift` — poziomy scrollowalny pasek dni (dzień tygodnia + max/min), dzień wyprawy wyróżniony kolorem/obwódką. Działa dla KAŻDEGO przystanku z rozwiązaną lokalizacją (szczyt LUB zwykłe miasto — appka nie rozróżnia, mechanizm jest identyczny).
+- Podłączony w `PlannedStopRow.weatherStripSection`, widoczny gdy przystanek ma I lokalizację I `checkInDate` (puste dla `.home`, patrz `stayDatesSection`).
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit". Do sprawdzenia: wyszukanie „Rysy" w nowym przycisku, ustawienie daty przyjazdu, czy pasek prognozy się pokazuje z wyróżnionym dniem wyprawy.
+
+## 12.09.2026 — "Welcome back" na Home wywołane przez testową podróż bez tytułu, fix `justCompleted`
+
+User zobaczył na Home kartę "Welcome back — Poland · 1 day" i nie rozpoznał takiej podróży, nie mógł zdecydować czy bezpiecznie ją odrzucić X.
+
+**Diagnoza — bez zgadywania, bezpośrednio z bazy na telefonie** (`devicectl device copy from --domain-type appDataContainer`, kopia `default.store`, `sqlite3` read-only na skopiowanym pliku, nie żywym). Znaleziona podróż `Z_PK=20`: **bez tytułu, bez `startDate`/`endDate` na poziomie podróży**, dwa przystanki — Zakopane (bez dat w ogóle) i **Rysy** (`checkInDate` = dokładnie moment testowania nowego przycisku "Search for a peak" dziś wcześniej). To artefakt testu funkcji pogody dla szczytów z tej samej sesji, nie prawdziwe wspomnienie usera.
+
+**User zaproponował regułę:** *"jesli nie bylo dokladnej daty podrozy to nie wracal bym ze wspomnieniami"* — czyli "Welcome back" nie powinno się triggerować bez PRAWDZIWEJ, jawnie ustawionej daty całej podróży.
+
+**Realna przyczyna:** `justCompleted` (kontroluje kartę) opierał się na `effectiveEndDate`, który przy braku `trip.endDate` spada z powrotem na daty PRZYSTANKÓW (`stop.checkOutDate ?? stop.checkInDate`, max ze wszystkich). Ta testowa podróż miała zero dat na poziomie podróży, ale JEDEN przypadkowy `checkInDate` na jednym przystanku wystarczył, żeby fallback zadziałał i podróż wyglądała na "zakończoną wczoraj".
+
+**Fix:** `justCompleted` wymaga teraz `trip.endDate` WPROST, bez fallbacku na daty przystanków — user musiał faktycznie wypełnić kiedy CAŁA podróż się kończy (nie przypadkowa data jednego przystanku), żeby appka w ogóle rozważała pokazanie "Welcome back". Sprawdzone na prawdziwych podróżach w bazie (Greece/Thailand/Romania) — wszystkie mają jawnie ustawione `startDate`/`endDate` na poziomie podróży, więc fix ich nie dotyka. `looksCompleted` (używane gdzie indziej, np. przycisk "Convert"→"Create Memory") świadomie NIETKNIĘTE — mniej inwazyjne miejsce, inny próg ryzyka.
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit". Testowa podróż Zakopane→Rysy ZOSTAJE w Trip Planning (nie kasowana z bazy bezpośrednio — zbyt ryzykowne, ten sam WAL-checkpoint gotcha co przy odzysku Braszowa) — user może ją usunąć sam z listy w Trip Planning (swipe-to-delete), albo zostawić jako pustą, nieszkodliwą pozycję skoro "Welcome back" już się dla niej nie pokaże.
+
+## 12.09.2026 (ciąg dalszy) — realny bug: nie dało się wybrać szczytu jako miejsca docelowego
+
+User próbował dokończyć wczorajszą funkcję (pogoda do dnia wyprawy) na żywo — wpisał "Rysy" w polu miasta, dostał same złe podpowiedzi Apple (`Rysy Court, Swindon`; ulice "Rysy" w Warszawie/Łodzi; `Rysykari, Finlandia`), kliknął nowy przycisk "Search for a peak" — user: *"nie da sie wybrac szczytu jako miejsca docelowego"*.
+
+**Realna przyczyna — wyścig, ten sam wzorzec co przy zwykłym wyborze miasta, ale bez zabezpieczenia.** `cityField.onChange(of: stop.cityName)` zeruje `stop.coordinate` i odpala `completer.updateQuery(...)` przy KAŻDEJ zmianie nazwy miasta (słusznie dla zwykłego wpisywania tekstu — stara lokalizacja przestaje być aktualna). Ale handler `PeakSearchView { peak in ... }` ustawiał `stop.cityName = peak.name` jako PIERWSZĄ linijkę, więc `onChange` zerował `stop.coordinate` zaraz PO tym jak reszta closure'a już go ustawiła na współrzędne szczytu — szczyt nigdy się nie zapisywał, niezależnie ile razy user próbował. Zwykły wybór podpowiedzi miasta (`select(_:)`) ma dokładnie na to zabezpieczenie (`isApplyingSuggestion` — flaga blokująca `onChange` na czas stosowania wyboru) — peak search go nie miał, bo dopisany osobno wczoraj bez przeniesienia tego wzorca.
+
+**Fix:** ten sam strażnik `isApplyingSuggestion = true/false` (+ `completer.clear()`) wokół handlera `PeakSearchView`, jeden do jednego z `select(_:)`.
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit". Reszta z dwóch wiadomości narzeczonej (limit linii/pinów na mapie, dynamiczne znaczki z rarity score) — user: "za reszte wezmiemy sie jutro", świadomie odłożone, nie zaczęte.
+
+## 12.09.2026 (ciąg dalszy) — "Rarity Score": plakat skaluje się danymi, nie gęstością
+
+User zmienił zdanie ("jutro" → teraz): *"tak masz wszystkie potrzebne rzeczy wiec to wprowadz"* — pełne wdrożenie obu wiadomości narzeczonej naraz.
+
+**Nowy plik `TravelRarityScore.swift`** — silnik rankingu "co pokazać jak jest za dużo":
+- Tabela kontynentów (227 kodów kraju → EU/AS/AF/NA/SA/OC/AN, pokrywa cały `journeyStampAssetByCountryCode`), działa też na podregionach UK (`GB-ENG` itd.).
+- `distanceKm` — Haversine, do liczenia dystansu OD DOMU do konkretnego miejsca (appka miała już `legDistanceKm` per przystanek, ale to suma przelotów całej trasy, nie dystans do pojedynczego punktu).
+- `score(coordinate:countryCode:home:homeContinent:)` = `dystans/1000 × 3` (dominujący czynnik) + `15` bonus za inny kontynent niż dom. Świadomie BEZ ręcznej bazy "jak rzadki jest każdy z ~200 krajów" (niemożliwa do utrzymania, tak samo arbitralna jak zgadywanie) i BEZ "ulubionych" (appka nie ma jeszcze takiej flagi — user potwierdził że nie trzeba jej teraz dodawać).
+
+**"Dom" usera — wyliczony automatycznie** (`homeCoordinate`/`homeContinent` w `TravelJourneyPosterView`): najczęściej występujący przystanek startowy (`order == 0`) ze wszystkich podróży, zaokrąglony do ~11m żeby to samo lotnisko z lekko różniącym się GPS-em liczyło się jako jeden dom. Zero pytania usera wprost — appka i tak zna te dane.
+
+**Znaczki krajów — dynamiczne, nie sztywna lista:**
+- `visibleStampCount`: ≤12 krajów → wszystkie, 13-25 → 12, 25+ → 10.
+- `rankedCountryStamps` sortowane przez rarity score (malejąco), ucięte do `visibleStampCount`, POTEM wyświetlone alfabetycznie (ranking decyduje KTÓRE się zmieszczą, nie w jakiej kolejności są pokazane).
+- `moreStampsCard` — nowy kafelek "+N MORE" (przerywana obwódka, ten sam gabaryt co znaczek), doklejony na końcu `stampsRow` gdy coś odcięte.
+- `countryStamps` dostał `coordinate` (reprezentatywny przystanek per kraj — NAJDALSZY od domu w tym kraju, nie przypadkowo pierwszy z brzegu, np. lotnisko tranzytowe blisko granicy).
+
+**Mapa — trzecia runda, tym razem oba wymiary naraz:**
+- **Linie tras**: próg wg `stats.flightCount` (≤10 → wszystkie, 11-25 → top 5, 25+ → top 3), ranking po CAŁKOWITYM dystansie podróży (`legDistanceKm` sumowane per trasa) — najdłuższa/najbardziej efektowna trasa (np. "Europe → Thailand") wygrywa, nie kolejność w bazie.
+- **Pinezki**: dedup po współrzędnej zaokrąglonej do ~1km (dwa prawie-identyczne przystanki w tym samym mieście = jedna pinezka), potem cap do 15 przez `TravelRarityScore` gdy zdedupowanych przystanków jest więcej.
+
+Sprawdzone na realnych danych usera (14 krajów, 28 podróży, 56 lotów): znaczki → 12 pokazanych + "+2 MORE" (pasuje do wytycznej "14 krajów → ~10-12"); linie tras → tylko top 3 (56 lotów > próg 25).
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit". Do sprawdzenia: czy plakat teraz pokazuje mniej linii/pinów, czy znaczki mają sensowny wybór + kafelek "+2 MORE", i czy wybrane kraje/trasy wyglądają na faktycznie "bardziej imponujące" (dalekie/inny kontynent), nie przypadkowe.
+
+## 12.09.2026 (ciąg dalszy) — brakujące tłumaczenia (7 stringów) + mapa spójna ze zdjęciami
+
+**Tłumaczenia.** User: "mamy tlumaczenia dla jezykow wiec dlaczego to nie jest poprawione" — sprawdzone bezpośrednio w `Localizable.xcstrings`: 7 stringów z ostatnich dwóch dni (szukanie szczytu z 09.09 — `"Search for a peak"`, `"No peaks found"`, `"Peak name, e.g. Rysy"`, opis pustego stanu — ORAZ `"Completed"`/`"Planned"` z podziału Trip Planning z 26.08, plus dzisiejsze `"MORE"`) nigdy nie trafiły do katalogu, dokładnie ten sam nawracający wzorzec co 10.08 (Ranking). Dodane wszystkie 7, każdy z tłumaczeniem na 26 języków (skrypt Python, `extractionState: manual` jak reszta ręcznie dodanych wpisów w katalogu), zweryfikowane że JSON dalej parsuje się poprawnie i każdy klucz ma komplet języków.
+
+**Mapa spójna ze zdjęciami.** User: "moze mapa bedzie pokazywac loty ktore mamy na zdjeciach" — trafna uwaga: mapa (rarity score) i polaroidy (najnowsze podróże z realnym zdjęciem) były dobierane NIEZALEŻNIE, mogły pokazywać zupełnie inne podróże. `PolaroidPhoto` dostał `tripID` (z `stop.trip?.id`), `.task` przepisany sekwencyjnie (photos przed mapą), `renderMapSnapshot(priorityTripIDs:)` — podróże z polaroidem wymuszone na pierwszym miejscu w OBU rankingach (tras i pinezek), reszta miejsc dogrywa się jak dotąd (rarity score/dystans).
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit".
+
+**Status względem pełnej listy z dwóch wiadomości narzeczonej (user zapytał wprost "ile zrobiles"):**
+- MAPA: max 12-15 pinów ✅, max 3-5 tras ✅, automatyczne priorytety ✅, teraz spójne ze zdjęciami ✅ — **kompletne**.
+- STAMPS: dynamiczne ✅, max ~10-12 widocznych ✅, "+X MORE" ✅ — **kompletne**.
+- STATS: Countries/Trips/Km/Flights — było już zrobione wcześniej, bez zmian.
+- POLAROIDS: max 5 ✅ (było), jeden klasyczny typ ramki ✅ (od cofnięcia ramek dekoracyjnych), rotacje ✅ (było) — **ale "różne rozmiary" NIE zrobione**, wszystkie polaroidy dalej mają sztywne 220×220. To jedyny punkt z listy jeszcze nieruszony.
+
+## 12.09.2026 (ciąg dalszy) — domknięcie hierarchii rarity score: ulubione + najnowsze
+
+User: "zabieramy sie za to co nie jest zrobione" po pełnym rozliczeniu punkt-po-punkt z obu wiadomości narzeczonej.
+
+**Punkt 5 hierarchii — "Ulubione, jeśli user je oznaczył".** Appka nie miała wcześniej ŻADNEJ flagi "ulubiona podróż". Dodane: `SavedTrip.isFavorite: Bool = false` (nowe pole, domyślna wartość — bezpieczna migracja SwiftData, ten sam wzorzec co reszta modelu). UI w `TripsListView`: serduszko w wierszu (widoczne tylko gdy `isFavorite`), toggle w `contextMenu` I `swipeActions` (leading, różowy tint, obok "Share as Template"). Dwa nowe stringi (`"Add to Favorites"`/`"Remove from Favorites"`) przetłumaczone na 26 języków OD RAZU, nie później.
+
+**Punkt 6 hierarchii — "Najnowsze odwiedzone".** `TravelRarityScore.score(...)` dostał `isFavorite`/`visitDate` — `isFavorite` dodaje +8 (mniej niż +15 za inny kontynent, ale więcej niż samo kilka lat różnicy w dystansie — user musi świadomie oznaczyć, więc to silny, ale nie dominujący sygnał), `visitDate` dodaje do +3 liniowo zanikające przez 3 lata (najsłabszy czynnik z całej hierarchii, jak user chciał — rozstrzyga tylko remisy między podobnie rzadkimi miejscami).
+
+**Podłączenie w `TravelJourneyPosterView`:** `CountryStamp` dostał `isFavorite`/`visitDate` — gdy user oznaczy ulubioną podróż do KRAJU już reprezentowanego przez inny (dalszy, ale nie-ulubiony) pobyt, ulubiony pobyt PRZEJMUJE reprezentację tego kraju (żeby `isFavorite` faktycznie docierało do rankingu, nie ginęło przegrywając z samym dystansem). Ranking pinezek na mapie też dostał oba czynniki (`stop.trip?.isFavorite`, `stop.arrivalDate`).
+
+**Świadomie NIE ruszone:** wizualny redesign "Passport Strip" (pasek w stylu karty pokładowej z samym tekstem+samolocikiem zamiast ilustrowanych znaczków) — appka już ma 212 wyciętych, ilustrowanych znaczków krajów (duża wcześniejsza inwestycja tej samej sesji) i dynamiczny wybór/limit/"+N MORE" już realizuje ISTOTĘ pomysłu (automatyczny, skalujący się wybór reprezentatywnych krajów). Przeskórowanie na płaski tekst byłoby krokiem wstecz względem tego co już wycięte, nie do przodu — czeka na wyraźne potwierdzenie usera zanim to ruszę.
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit". Do sprawdzenia: oznaczenie ulubionej podróży w Trip Planning/liście podróży (serduszko), czy wpływa na to które znaczki/pinezki wygrywają na plakacie.
+
+## 12.09.2026 (ciąg dalszy) — wczorajszy fix wyboru szczytu WCIĄŻ nie działał; prawdziwa przyczyna: reset strażnika w TYM SAMYM przebiegu
+
+User: „dalej tutaj cos jest nie tak" + zrzut identyczny jak wczoraj (złe podpowiedzi Apple dla "Rysy" dalej widoczne PO wybraniu szczytu) — „nie wlasnie wybralem rysy". Przy okazji drugi zgłoszony objaw: „do tego nie mamy temperatury pokazanej" (karta "Your trip starts today" na Home, Zakopane→Rysy, bez temperatury).
+
+**Prawdziwa przyczyna — wczorajszy fix (`isApplyingSuggestion` strażnik) miał TEN SAM rodzaj buga co próbował naprawić.** Resetowałem `isApplyingSuggestion = false` OD RAZU, w tej samej synchronicznej domknięciu co ustawienie `stop.cityName`/`stop.coordinate`. SwiftUI/Observation batchuje WSZYSTKIE zmiany z jednego przebiegu w JEDEN cykl aktualizacji — `.onChange(of: stop.cityName)` widział więc `isApplyingSuggestion` już z powrotem `false`, zanim guard w ogóle zdążył coś zablokować. Strażnik nigdy realnie nie chronił, mimo że kod "wyglądał" poprawnie. `select(_:)` (wybór zwykłego miasta) unika tego przez reset W OSOBNYM `Task` PO `await` — realna, nie tylko kosmetyczna różnica.
+
+**Fix (poprawka poprawki):** `completer.clear(); Task { isApplyingSuggestion = false }` — reset trafia na KOLEJNY przebieg pętli zdarzeń, nie na ten sam.
+
+**Brak temperatury — bezpośredni SKUTEK tego samego buga, nie osobny problem.** `PlannedStop.coordinate` to computed property zwracająca `nil` gdy `latitude == 0 && longitude == 0` (domyślne wartości pól). Skoro wybór szczytu nigdy realnie się nie zapisywał, współrzędne Rysów zostały na 0/0 → `coordinate` = `nil` → `HomeView`'s `.task` liczący prognozę (`guard let coordinate = ...else { return }`) cicho rezygnował, `forecast` nigdy się nie ustawiał. Ten sam mechanizm dotyczy nowego `TripWeatherStrip` w Trip Planning.
+
+Build device → **BUILD SUCCEEDED**, wgrane na „Pit". **User musi wybrać Rysy PONOWNIE** na tej testowej podróży (stary, zepsuty zapis się sam nie naprawi) — dopiero wtedy współrzędne faktycznie się zapiszą i temperatura powinna się pojawić w obu miejscach (karta na Home + pasek w Trip Planning).
+
+**Weryfikacja przez devicectl WAL-forensics** (ten sam mechanizm co odzysk Braszowa) — user zgłosił dalej brak temperatury, sprawdzone bezpośrednio zamiast zgadywać: user ma teraz **3 testowe podróże** Zakopane→Rysy z ostatnich dwóch dni. Dwie pierwsze (z przed fixa) mają współrzędne Rysów dalej **0.0/0.0** (zepsute na trwałe, stary zapis się nie naprawia wstecznie) — jedna z nich pokazuje się jako karta "starts today" na Home, stąd wciąż brak temperatury. TRZECIA (świeża, po prawdziwym fixie) ma **prawdziwe współrzędne 49.18°N/20.09°E** — fix faktycznie działa — ale ta podróż ma datę jutro, nie dziś, więc nie kwalifikuje się do karty "starts today". User potwierdził "ok dziala" po tym wyjaśnieniu — do posprzątania (dwie zepsute testowe podróże) zostawione userowi.
+
+## 12.09.2026 (ciąg dalszy) — druga runda dopracowania plakatu + realny bug: mieszane języki w podpisach
+
+User (feedback narzeczonej, siedem punktów po zobaczeniu żywego plakatu z pierwszej rundy rarity score):
+
+1. **Linie lotów wciąż zbyt dominujące** — mimo cappingu widoczne, grube, duże samoloty.
+2. **Piny można zmniejszyć** — duże, białe, gęsty tłok przy większej liczbie miejsc.
+3. **Zdjęcia lekko zmniejszyć** (~5-10%) — wciąż zasłaniają dużą część mapy, ale liczba 5 zostaje.
+4. **Podpisy muszą mieć jeden język** — user pokazał przykład: "Adeje, Hiszpania" / "Mueang Chiang Rai District, Tajlandia" / "Grecja" wymieszane z angielskim UI.
+5. "+2 MORE" — user sam doszedł do wniosku że zostaje bez zmian (nie trzeba dopisywać "COUNTRIES"/"IN PASSPORT", obok "14 COUNTRIES" jest już jasne).
+6. Pieczątki wg unikalności — już zrobione (rarity score), potwierdzenie kierunku.
+7. Dół plakatu lekko przeładowany — większy odstęp między statystykami a pieczątkami.
+
+**Punkt 4 — realny bug, nie kosmetyka.** `TravelAchievementsCalculator.countryGroupingDisplayName` zwracał `fallback` (zwykle `stop.country`) verbatim — surowy string z geokodowania Apple Maps, zapisany W JĘZYKU AKTYWNYM W MOMENCIE DODAWANIA przystanku (mógł być inny niż język appki teraz), appka nigdy go nie tłumaczyła. **Fix:** gdy appka zna `countryCode`, nazwa kraju idzie przez wbudowaną w iOS bazę nazw regionów (`Locale.localizedString(forRegionCode:)`) w języku AKTUALNIE aktywnym w appce (`Bundle.main.preferredLocalizations`, ten sam mechanizm co istniejący `isPolishLanguageActive`) — zawsze spójne z resztą UI, niezależnie kiedy/w jakim języku przystanek dodano. Naprawione w JEDNYM miejscu (ta funkcja jest już współdzielona przez Passport/Wrapped/Poster), więc fix działa wszędzie naraz, nie tylko na plakacie.
+
+**Reszta punktów:**
+- Linie tras: twardy limit **3** (było 3-5), dodatkowo **2** gdy mapa ma >8 pinów (gęsto) — "mapa ma być tłem, nie wykresem lotów". Cieńsza linia (2.5→1.5pt), niższa opacity, mniejszy samolot (16→11pt).
+- Piny: rozmiar 22→16, cień lżejszy (`shadow(color:radius:)` zamiast gołego `shadow(radius:)`), cap **15→12**.
+- Zdjęcia: 220→200pt (~9%), liczba (5) bez zmian.
+- Odstęp statystyki→pieczątki: 30→38pt.
+
+Build device → **BUILD SUCCEEDED** (pierwsza próba instalacji padła na przejściowy błąd devicectl, druga bez problemu), wgrane na „Pit".
+
+**Zgłoszony bug (user, zrzut ekranu "View recent photos.heic"):** kilka nałożonych ikon samolotu na trasie z bliskimi przystankami (city-hopping) zlewało się w czarną "gwiazdkę". Przyczyna: `flightPathOverlay` rysował samolocik NA KAŻDYM odcinku trasy (`zip(route, route.dropFirst())`), nie raz na całą linię — krótkie, bliskie odcinki = kilka nałożonych, różnie obróconych ikon w jednym miejscu. **Fix:** nowa funkcja `routeMidpoint(_:)` liczy JEDEN punkt w połowie CAŁKOWITEJ długości trasy (po realnym dystansie, nie połowie listy punktów) + kąt odcinka w którym ten punkt faktycznie leży — jeden samolocik na całą linię. Build + install OK.
+
+## 12.09.2026 (ciąg dalszy) — Warstwa 1: podświetlanie odwiedzonych krajów na mapie plakatu
+
+Kolejna, trzecia runda feedbacku narzeczonej usera — bardzo konkretny, przemyślany system czterowarstwowy dla mapy plakatu (kraje podświetlone / pinezki-wspomnienia / wyjątkowe kierunki poza głównym obszarem / linie lotów jako dekoracja), z powodu że po ograniczeniu pinów/linii w poprzedniej rundzie mapa zaczęła wyglądać "zbyt pusto".
+
+**Sprawdzone bezpośrednio w bazie przed kodowaniem** (zamiast zgadywać): user ma dziś podróże wyłącznie do UK/ES/TH/IT/GR/PL/RO/TR/SK/QA/FR/CY/CH — zero Hawajów/Brazylii/Antarktydy. Warstwa 3 (specjalne oznaczenia dla odległych kierunków, mapowe "inset") to więc czysto teoretyczny scenariusz na razie — **świadomie odłożona** (zgodnie z zasadą etapowego rozwoju, bez spekulacyjnych warstw pod coś czego jeszcze nie ma). Warstwy 2 i 4 (piny/linie ograniczone i powiązane ze zdjęciami) już zaimplementowane w poprzednich dwóch rundach.
+
+**Zaimplementowana Warstwa 1 — podświetlanie krajów:**
+- Sprowadzone dane granic państw: Natural Earth 110m (domena publiczna), skonwertowane z ~840KB do ~180KB (tylko ISO_A2 + nazwa + geometria zaokrąglona do 3 miejsc po przecinku, ~110m dokładności — wystarczające dla małej mapy na plakacie). Zbundlowane jako `PMemoriesApp/WorldCountryBoundaries.json`.
+- Nowy `WorldCountryBoundaries.swift` — parser JSON → `[String: Country]` (kod ISO A2 → poligony/pierścienie jako `CLLocationCoordinate2D`), wczytywany raz, leniwie.
+- `renderMapSnapshot` liczy odwiedzone kraje wg LICZBY WYCIECZEK (nie przystanków — jedna podróż z kilkoma miastami w tym samym kraju to jedna wizyta), projektuje ich poligony przez `snapshot.point(for:)` (ta sama transformacja co piny/trasy), koloruje: kraj domu osobnym ciepłym odcieniem, reszta odwiedzonych w stonowanym niebiesko-zielonym, kraje z 2+ wycieczkami nieco mocniej nasycone — sama intensywność, nie inny kolor (zgodnie z "kraj z większą liczbą podróży = nieco ciemniejszy").
+- Nowy `countryFillsOverlay` (Path + `FillStyle(eoFill: true)` żeby dziury w granicach się poprawnie wycinały) rysowany NAJPIERW, pod trasami/pinezkami, żeby te wciąż były czytelne na wierzchu.
+- Nieodwiedzone kraje CELOWO nie są dorysowywane wcale — baza `.mutedStandard` Apple Maps już jest blado-kremowa, więc "reszta mapy wyblakła" dostajemy za darmo, bez renderowania 175 krajów niepotrzebnie.
+
+Build (dwa razy — pierwsza kompilacja nie widziała nowego pliku, bo `xcodegen generate` był uruchomiony PRZED jego utworzeniem, nie po; drugi `xcodegen generate` + rebuild naprawił) → **BUILD SUCCEEDED**, install OK.
+
+**Trafne pytanie usera: "co jeśli tester ma w bazie kraj którego nie ma w danych granic?"** Sprawdzone zamiast zgadywane: zestaw 110m miał tylko 175 z 249 kodów ISO — brakowało 76, w tym bardzo prawdopodobnych celów (Malta, Singapur, Hong Kong, Monako, Liechtenstein, San Marino, Malediwy, Bahrajn). U takiego testera kraj po prostu nie zostałby podświetlony (appka się nie wywala, `renderMapSnapshot` cicho pomija kraj bez odpowiednika w `WorldCountryBoundaries.all` — ale funkcja realnie "nie działa" dla sporej grupy userów). **Fix:** przejście z Natural Earth 110m na 50m (237 krajów zamiast 175, plik 1.6MB zamiast 180KB — wciąż akceptowalne). Po drodze złapany DRUGI bug we własnym skrypcie konwersji: Tajwan miał w źródle `ISO_A2="CN-TW"` (nie standardowe "TW"), mój filtr sprawdzał tylko wartość `-99` więc przepuszczał zły kod — naprawione (waliduje teraz format dwuliterowy, próbuje po kolei `ISO_A2_EH`→`ISO_A2`→`WB_A2`→`POSTAL`). Pozostało 13 brakujących kodów (m.in. Gibraltar, bezludne wyspy typu Bouvet/Wyspy Kokosowe, francuskie terytoria zamorskie zwykle geokodowane jako Francja) — świadomie zaakceptowane, 10m dałoby marginalną poprawę za dużo większy plik. Build + install OK.
+
+## 12.09.2026 (ciąg dalszy, jeszcze później) — kosmetyczne dopracowanie po zaakceptowaniu kierunku
+
+User: "Teraz wygląda dużo lepiej... nie zmieniałbym już stylu, obecna wersja ma właściwy kierunek" — kierunek (podświetlone kraje + nocna mapa) zaakceptowany na stałe, tylko drobne poprawki:
+- Podpisy zdjęć ("City, Country" po angielsku, np. "Cookstown, Northern Ireland") — już spełnione poprzednią naprawą i18n, bez zmian.
+- Pieczątki "+N MORE" i statystyki jako układ — bez zmian (user: zostawiłby dokładnie tak jak jest).
+- Zdjęcia: 200→190 (~5%, jak proszone), plus DOLNE ŚRODKOWE zdjęcie (layout `(20, 300, -4)` — jedyne blisko środka x I najniżej) podniesione 300→265, bo nachodziło na statystyki.
+- Mapa nocna: bursztyn cieplejszy (więcej czerwieni, mniej niebieskiego), obrys krajów jaśniejszy + trochę mocniejszy (opacity 0.4→0.5).
+- Piny: 16→18, jaśniejszy kremowy + dodana cienka kremowa obwódka (halo) wokół każdego pinu dla kontrastu na KAŻDYM fragmencie mapy (user zgłosił konkretnie Bliski Wschód jako słabo widoczny), mocniejszy cień.
+- Linie lotów: twardy limit **2** zawsze (było 2-3 zależnie od gęstości pinów) — user: "zostawić maksymalnie dwie". Sama subtelność/przezroczystość linii ZOSTAJE bez zmian (user: "obecna subtelność jest odpowiednia, nie zwiększałbym ich mocno").
+- Statystyki: liczby nieco ciemniejsze/mocniejsze (bez nowego tła/karty — user explicite: "nie dodawałbym nowych ramek ani ozdobników").
+- Małe kraje (Malta/Singapur/Watykan) — user zapytał czy podświetlenie wystarczy. Odpowiedź: pin nadal się pojawi niezależnie od widoczności wypełnienia kraju (system pinów i podświetlenia działają NIEZALEŻNIE), więc lokalizacja i tak jest oznaczona nawet gdy sam kolor kraju ledwo widoczny na małej mapie — osobne insety/znaczniki (Warstwa 3) zostają odłożone jak wcześniej, bez zmian tej decyzji.
+
+Build + install OK.
+
+## 12.09.2026 (ciąg dalszy, jeszcze później #2) — bug "Grecja, Greece" w podpisie + lepsze geokodowanie odległych miejsc
+
+User: zdjęcie z plaży Elafonisi (Kreta) ma podpis "Grecja Greece" zamiast nazwy plaży. Dwa oddzielne, prawdziwe problemy:
+
+**1. Duplikat kraju w dwóch językach.** `countryGroupingDisplayName` liczy nazwę kraju w AKTUALNYM języku appki (od poprzedniej naprawy i18n), ale dedup w `TravelJourneyPosterView` porównywał ją do `stop.cityName` prostym `==`. Dla tego przystanku `cityName` = "Grecja" (zapisane PO POLSKU w momencie dodania — geokodowanie nie znalazło żadnej miejscowości, patrz niżej), `countryName` policzony teraz = "Greece" (po angielsku) — stringi się nie zgadzały, dedup nie zadziałał, wyszło "Grecja, Greece". **Fix:** nowa `TravelAchievementsCalculator.cityNameIsJustCountryName(_:countryCode:)` sprawdza czy `cityName` to nazwa kraju we WSZYSTKICH 27 obsługiwanych językach appki (nie tylko string-match w jednym), dedup teraz odporny na to że `cityName` mógł zostać zapisany w innym języku niż appka pokazuje dziś.
+
+**2. Przyczyna źródłowa — dlaczego `cityName` w ogóle wyszedł "Grecja".** `CityGeocoder.reverseResolve`/`reverseResolveFull` (Smart Route Detector, auto-wykrywanie przystanków z klastrów zdjęć) miały łańcuch `locality ?? administrativeArea ?? country` — dla odległej, niezaludnionej plaży Apple'owy geokoder często nie zwraca ANI `locality` ANI `administrativeArea`, więc łańcuch leciał od razu do samej nazwy kraju. **Fix:** dodane pośrednie szczeble PRZED krajem — `subLocality` (okolica), `areasOfInterest` (nazwane punkty zainteresowania — dokładnie tu Apple trzyma nazwy typu "Elafonissi Beach" dla znanych miejsc bez własnej miejscowości), `name` (surowy POI/adres) — nowa `CityGeocoder.placeName(from:)`, współdzielona przez obie funkcje.
+
+**Uwaga dla usera:** fix #2 działa tylko dla NOWYCH/przyszłych auto-wykryć — TEN konkretny przystanek (Elafonisi) ma już zapisane `cityName = "Grecja"` w bazie, fix #1 sprawia że podpis będzie teraz poprawnie pokazywał samo "Greece" (bez duplikatu), ale nie zgadnie wstecznie prawdziwej nazwy "Elafonisi". Żeby dostać samą nazwę plaży w podpisie: Trips → Edit na tej podróży → w polu nazwy miasta dla tego przystanku wpisać ręcznie "Elafonisi" → zapisać ponownie.
+
+Build + install OK.
+
+## 13.09.2026 — nowe tła scrapbookowe (test na żywo), pytanie o losowanie tła
+
+User zapytał dlaczego tło plakatu "nie zmienia się za każdym razem jak generuję". Wyjaśnione (zweryfikowane w kodzie, nie zgadywane): wszystkie 6 teksturek to realnie różne pliki (sprawdzone sumy kontrolne), ale losowanie dzieje się RAZ na wizytę ekranu (`@State` init przy tworzeniu widoku), nie przy każdym eksporcie w ramach tej samej wizyty — to świadomy design (podgląd = eksport w tej samej sesji). Dodatkowo wszystkie 6 to bardzo podobne sepiowe teksturki, więc różnica bywa ledwo zauważalna nawet gdy losowanie działa.
+
+User przesłał **11 nowych teł** w stylu "scrapbook podróżniczy" (ilustrowane narożniki, kompas, sygnpost z miastami, cytaty). Przegląd (otworzone wszystkie 11 w pełnej rozdzielczości, nie tylko na oko z miniaturek):
+- **5 z 11 ma wypalone FAŁSZYWE osobiste pieczątki z konkretną datą/miastem** — "DEPARTED LONDON 28 APR 2024", "ARRIVED BALI 12 AUG 2024", "DEPARTED BANGKOK 20 NOV 2024", "ARRIVED SINGAPORE 14 FEB 2025", "DEPARTED LONDON 12.05.2024". To PLAKAT Z PRAWDZIWĄ historią usera — losowe wyświetlenie fałszywej daty wyjazdu wyglądałoby jak błąd appki, nie ozdoba. Wykluczone z puli.
+- **Pozostałych 6 jest "bezpiecznych"** (tylko ozdobne hasła/kompas/mapa, bez fałszywych dat): dwa kolorowe (Amalfi z kwiatami, "Travel Discover Repeat" z Fuji), cztery sepiowe (Kolosseum, "Life is a Journey", sparse wariant z kompasem, "Travel More" Capri).
+- **Realny konflikt strukturalny**: prawie każde z 11 ma własną WYPALONĄ "kartę tytułową" w lewym górnym rogu (dokładnie tam gdzie siedziało nasze `originStamp`) i często ten sam napis "Collect Moments Not Things"/"Adventure Awaits" co nasza WŁASNA plakietka `adventureAwaitsStamp` (prawy górny róg nagłówka) — bez zmian nachodziłoby się i dublowało tekstem.
+- **Ryzyko proporcji**: tła mają stałe 1024×1536 (2:3), a nasz plakat ma DYNAMICZNĄ wysokość (zależną od liczby zdjęć/pieczątek) — `.aspectRatio(fill)+clipped` przytnie brzegi, dokładny efekt trzeba zobaczyć na żywo, nie zgadywać.
+
+**Test na żywo (tymczasowy, łatwo odwracalny):** wybrane 2 bezpieczne warianty (Kolosseum sepia + Amalfi kolorowe) dodane jako `PosterBackgroundScrapbookMono`/`...Color` w Assets.xcassets, `paperTextureNames` przełączone TYLKO na te dwa (stara lista 6 teksturek zakomentowana, nie usunięta — łatwy powrót). Logo (`originStamp`) przeniesione z lewego rogu na ŚRODEK góry nagłówka (jedyna strefa pusta na wszystkich 11 wariantach), `adventureAwaitsStamp` wyłączone (zdefiniowane, ale niewywoływane — uniknięcie duplikatu tekstu z tłem).
+
+Build + install OK — czeka na ocenę usera po zobaczeniu obu wariantów na żywo (trzeba wejść na ekran plakatu 2-3 razy, żeby trafić na oba).
+
+## 13.09.2026 (ciąg dalszy) — czwarta runda: 10-punktowa lista "10/10", tylko punkt 1 (mapa) na razie
+
+User przesłał obszerną, 10-punktową listę poprawek (mapa/zdjęcia/nagłówek/statystyki/znaczki/dolny tekst/tło/typografia/weryfikacja danych/hierarchia wzroku) z jawną kolejnością priorytetów na końcu. User: "robimy to pokolei nie wszystko naraz" — implementacja WYŁĄCZNIE punktu 1 (mapa) w tej rundzie, reszta czeka na kolejne, osobne potwierdzenia.
+
+**Mapa — zrobione:**
+- Wysokość 760→660 (~13% mniej, "zostaw więcej miejsca na zdjęcia i dekoracje").
+- Zaokrąglenie rogów 18→24, gruba biała 6pt ramka zamieniona na cienką (3pt kremową + 1pt atramentową) — "jak oprawiona stara mapa w atlasie, nie okno appki".
+- `.saturation(0.55)` + ciepła sepiowa poświata na SAMEJ bazowej mapie Apple (nie na naszych kolorowych podświetleniach krajów/pinach — te zostają pełne) — "zmniejsz intensywność kolorów".
+- `options.pointOfInterestFilter = .excludingAll` — usuwa ikonki/podpisy punktów zainteresowania. Uczciwa uwaga w kodzie: nazwy kontynentów/krajów/miast są wypalone w stylu bazowej mapy Apple i NIE da się ich wyłączyć pojedynczo przez publiczne API — mniejsza mapa ogranicza ich liczbę naturalnie, ale nie usuwa całkowicie.
+- Trasy lotów: 1.5→1.1pt, niższa opacity, drobniejszy dash — "bardziej subtelne, cienkie, eleganckie".
+
+Build + install OK. Reszta listy (zdjęcia, nagłówek, dolny tekst/znaczki, statystyki, tekstury/typografia, weryfikacja danych) ŚWIADOMIE odłożona do kolejnych, osobnych rund na wyraźną prośbę usera.
+
+## 13.09.2026 (ciąg dalszy) — piąta runda: dopracowanie po akceptacji mapy (8.5-9/10 → cel 10/10)
+
+User potwierdził że nowy styl mapy zostaje ("nie zmieniałbym już stylu mapy"), 7 kolejnych drobnych poprawek z własną kolejnością priorytetów. Tym razem WSZYSTKO w jednej rundzie (nie "pokolei" jak poprzednio — to małe, niezależne parametry, nie przebudowa struktury):
+
+1. Mapa jeszcze -7.6% (610, było 660) — "wciąż przytłacza zdjęcia".
+2. Trasa loty: jaśniejsza + grubsza (1.1→1.3pt, opacity 0.42→0.6) — poprzednia runda poszła za daleko w stronę subtelności.
+3. Piny: mniejsze (18→16), złota obwódka zamiast kremowej, prawdziwy rzucony cień zamiast poświaty — "mały vintage pin, nie element aplikacji mapowej".
+4. **Realny bug**: "Mueang Chiang Rai District, Thailand" — dużo dłuższy niż inne podpisy. Nowa `TravelAchievementsCalculator.shortenedThaiDistrictName(_:)` — wąski, bezpieczny wzorzec (dokładny prefiks "Mueang "/sufiks " District"), nie rusza np. angielskiego "Lake District". Teraz: "Chiang Rai, Thailand".
+5. Taśma: deterministyczny "przypadkowy" kąt/szerokość/pozycja/przezroczystość PER ZDJĘCIE (wyprowadzony z hasha `polaroid.id`, nie prawdziwie losowy — ta sama fotka zawsze wygląda tak samo między odświeżeniami) — "zbyt równa i cyfrowa". Mocniejszy, bliższy cień pod zdjęciem.
+6. Statystyki: subtelna kremowa podkładka (opacity 0.55) POD istniejącą obwódką — nowe scrapbookowe tła są dużo gęstsze niż stare czyste teksturki, sam tekst nie zawsze wystarczał.
+7. **Weryfikacja danych — zrobiona NAPRAWDĘ, nie na słowo.** Świeży pull bazy z urządzenia + SQL bezpośrednio na `ZSAVEDTRIP`/`ZSAVEDSTOP`:
+   - Podróże: `COUNT(*) FROM ZSAVEDTRIP` = **28** ✓ (zgadza się z "28 TRIPS")
+   - Loty: `ZTRANSPORTRAWVALUE='plane'` = **56** ✓ (zgadza się z "56 FLIGHTS")
+   - Km: `SUM(ZLEGDISTANCEKM)` = **70539** ✓ (zgadza się co do jedności z "70,539 KM")
+   - Kraje: 13 surowych kodów ISO, ale GB ma przystanki zarówno w "England" jak i "Northern Ireland" (2 osobne narody wg logiki grupowania Passport/Wrapped) → 13-1+2 = **14** ✓ (zgadza się z "14 COUNTRIES" i 12 znaczków + "+2 more")
+
+   Wszystkie 4 liczby na aktualnym plakacie są PRAWDZIWE, nie zbieg okoliczności.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #2) — szósta runda: skutki uboczne stałej wysokości canvasu
+
+Po fixie proporcji tła (poniżej) user zgłosił nowe, przewidziane wcześniej ryzyko: mapa nachodzi na statystyki, znaczki za blisko, tekst dolny za blisko dekoracji tła, stopka nie na samym dole (duży pusty fragment tła po niej). Dokładna diagnoza:
+
+1. **Realna przyczyna nachodzenia mapy na statystyki**: pozycje zdjęć (`layouts` w `loadPolaroids`) były wyliczone pod mapę 760pt wysoką z dwóch rund temu — mapa skurczyła się od tego czasu do 610pt (-150 łącznie), ale offsety Y zdjęć nigdy nie zostały przeskalowane. Zdjęcia zwisały więc o te same absolutne piksele NIŻEJ pod dużo mniejszą mapą, nachodząc na tekst statystyk. Fix: wszystkie Y × 0.8 (≈610/760) — zdjęcia wracają na tę samą pozycję WZGLĘDEM krawędzi mapy co w oryginalnym projekcie. Dodatkowo odstęp mapa→statystyki 30→60.
+2. Znaczki: odstęp od statystyk 38→55.
+3. Tekst "X Countries • Countless Memories": odstęp od znaczków 26→42, plus subtelna kremowa podkładka (ta sama sztuczka co statystyki) — napis "Good People Good Places" z niektórych teł jest WYPALONY w grafice, nie da się go przesunąć, więc własny tekst dostaje gwarancję czytelności niezależnie co jest pod spodem.
+4. **Stopka nie na dole / duży pusty fragment tła po niej**: realna przyczyna — canvas ma teraz STAŁĄ wysokość z proporcji pliku tła (poprzedni fix), ale zwykły `VStack` bez elementu rozciągliwego renderuje się na swojej MINIMALNEJ naturalnej wysokości i ignoruje nadwyżkę zaproponowaną z zewnątrz — SwiftUI wtedy wyśrodkowuje/zostawia resztę jako martwe tło zamiast go wykorzystać. Fix: elastyczny `Spacer(minLength: 20)` tuż przed `brandBanner` — VStack z Spacerem FAKTYCZNIE rozciąga się do zaproponowanej wysokości, spacer automatycznie pochłania dokładnie tyle nadwyżki ile jest, stopka zawsze ląduje na samym dole niezależnie ile treści ma dany user (nie trzeba zgadywać liczb). `alignment: .top` na zewnętrznej ramce jako dodatkowe zabezpieczenie.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #3) — siódma runda: szósta runda przesadziła, korekta w drugą stronę
+
+User pokazał zrzut po szóstej rundzie — problem z nachodzeniem zniknął, ale ODWROTNY problem: zbyt duże odstępy (mapa→statystyki→znaczki), przez co między znaczkami a stopką powstała jedna duża, pusta "dziura" w tle (dokładnie tam gdzie wcześniej dodany `Spacer` pochłaniał nadwyżkę wysokości — nadwyżka była teraz WIĘKSZA, bo poprzednia runda dodała sporo paddingu). User doprecyzował KLUCZOWO: "zmniejsz TYLKO wysokość sekcji mapy, nie cały plakat" (canvas ma już stałą wysokość z proporcji tła, nie trzeba się o nią martwić).
+
+- Mapa: 610→480 (kolejne -21%, na TYLE mocniej niż poprzednie rundy, żeby realnie zwolnić miejsce na dole zamiast tylko przesuwać nadwyżkę do Spacera).
+- Pozycje zdjęć: Y przeskalowane ponownie (×0.787 ≈ 480/610) pod nową wysokość mapy, X przeskalowane ×0.85 ("zachować rozmiar zdjęć [190×190, bez zmian], ale lekko zmniejszyć odstępy MIĘDZY nimi").
+- Odstępy cofnięte w dół tam gdzie szósta runda przesadziła: mapa→statystyki 60→38, statystyki→znaczki 55→28, znaczki→tekst 42→26, `Spacer` przed stopką 20→10 (mniejsza nadwyżka do pochłonięcia dzięki krótszej mapie, więc mniejszy bufor wystarczy).
+- Tekst "X Countries • Countless Memories": większy i wyraźniej ważniejszy od sloganu (17→21, bold→heavy), slogan lekko mniejszy (13→12), kremowa belka pod spodem zwężona do samej treści (było `.frame(maxWidth: .infinity)` — pełna szerokość plakatu) i bardziej przezroczysta (0.5→0.35).
+- Nagłówek: odstęp logo→tytuł 12→20 + 8pt paddingu nad logo — "tytuł zbyt blisko elementów tła, logo potrzebuje więcej przestrzeni".
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #4) — ósma runda: mapa nachodząca na tytuł (realny bug renderowania) + drobne odstępy
+
+User przesłał zrzut: mapa wyraźnie nachodzi na tytuł "My Travel Journey" (widoczny tylko malutki czerwony skrawek tuż nad górną krawędzią mapy, reszta zasłonięta). Kluczowa uwaga usera: "mapa została przesunięta ze wszystkim do góry, mapa była przecież w dobrym miejscu, ale to co pod nią nie" — czyli NIE chodzi o to, że mapa jest za duża (formalna lista sugerowała zmniejszenie o 5-8%, ale user tę sugestię explicite unieważnił swoim komentarzem) — coś w renderze przesunęło ją nienormalnie wysoko.
+
+**Diagnoza (porównanie dwóch kolejnych zrzutów piksel-w-piksel, nie zgadywanie):** w rundzie siódmej `renderPosterImage()` ustawiał wysokość canvasu DWIEMA nakładającymi się ścieżkami naraz — jawny `.frame(height:)` na treści przekazanej do `ImageRenderer` ORAZ `renderer.proposedSize` z tą samą wartością. Wcześniej (przed fixem proporcji tła) tylko WIDTH było tak podwójnie ustawiane, height było `nil` w obu miejscach — bezkonfliktowo. Odkąd height też dostało dwie nakładające się ścieżki, `ImageRenderer` mierzył layout niespójnie. **Fix:** tylko `renderer.proposedSize` ustala teraz wysokość, `.frame()` na treści z powrotem tylko od szerokości (tak jak było pierwotnie, przed fixem tła) — jedno źródło prawdy zamiast dwóch.
+
+Dodatkowo z formalnej listy (część NIE unieważniona komentarzem usera):
+- Znaczki: dodany margines poziomy 20pt (wcześniej rząd sięgał do samej krawędzi treści, pierwszy/ostatni znaczek dotykały brzegu).
+- Odstęp mapa→statystyki: 38→62 ("mapa niemal dotyka liczb").
+- Odstęp znaczki→tekst: 26→48 ("przesunąć blok tekstowy 15-25px niżej").
+- Zdjęcia: Brașov i Chiang Rai (lewa kolumna) odsunięte dalej od siebie — user: "lewe dolne zdjęcie optycznie nachodzi na Brașov".
+
+Build + install OK — czeka na potwierdzenie że tytuł faktycznie znów w pełni widoczny (diagnoza podwójnego ograniczenia wysokości to najbardziej prawdopodobna przyczyna po analizie kodu, ale wymaga weryfikacji na żywo).
+
+## 13.09.2026 (ciąg dalszy #5) — dziewiąta runda: PRAWDZIWA przyczyna znaleziona (debug-obramowania), mapa "połyka" statystyki
+
+User: "nic się nie zmieniło" — poprzedni fix (podwójne ograniczenie wysokości w `renderPosterImage`) był błędną diagnozą. Zamiast dalej zgadywać z kodu: dodane TYMCZASOWE kolorowe obramowania (zielone wokół `header`, czerwone wokół `mapSection`) i poproszony o zrzut.
+
+**Zrzut z obramowaniami ujawnił prawdę:** zielony i czerwony box stykają się idealnie — header i mapa NIGDY nie nachodziły na siebie, tytuł był cały czas w pełni widoczny (fałszywy trop od początku). Prawdziwy problem: czerwony box (mapSection) był OGROMNY — rozciągał się w dół aż do okolic rzędu znaczków, całkowicie POCHŁANIAJĄC sekcję statystyk (Countries/Trips/Km/Flights nie było widać WCALE na zrzucie).
+
+**Realna przyczyna (potwierdzona, nie zgadywana):** `Image(uiImage: mapSnapshot).resizable().aspectRatio(contentMode: .fill)` ma udokumentowane przez Apple zachowanie — gdy proporcje obrazu źródłowego nie zgadzają się z miejscem docelowym, wymiar potrzebny do pełnego pokrycia MOŻE przekroczyć to co zaproponował rodzic. Mapa: `options.size = 1000×800` (1.25:1) w snapshotcie, ale wyświetlana w boksie ~992×480 (2.07:1, dużo szerszym) — żeby pokryć szerokość, SwiftUI skalował obraz do realnej wysokości ~794pt zamiast 480, a bez `.clipped()` na WŁAŚCIWYM kontenerze ta nadwyżka malowała się na wierzchu wszystkiego poniżej (statystyki, potem po drodze też znaczki/tekst w mniejszym stopniu).
+
+User (po konsultacji) doprecyzował: NIE generować mapy w innych proporcjach (obniżyłoby jakość, niepotrzebne) — problem ma zostać naprawiony wyłącznie przez poprawny `.clipped()` na kontenerze wyświetlania, bez ruszania `renderMapSnapshot`/`options.size`.
+
+**Fix zgodny z tą preferencją:**
+- Nowa stała `mapSectionHeight` (jedno źródło prawdy dla wysokości mapy, współdzielone).
+- `mapSection` rozdzielone na dwie warstwy: `mapCard` (sam obraz mapy + podświetlenia + trasy + piny + ramka + cień) z WŁASNYM `.frame(maxWidth: .infinity).frame(height:).clipped()` — twarda gwarancja że NIC z karty mapy nie namaluje się poza jej boksem; oraz osobna warstwa `ForEach(polaroids)` w tym samym `mapSection`, ale BEZ clipowania — żeby zdjęcia dalej mogły celowo wychodzić poza dolną krawędź mapy (zamierzony efekt sprzed tygodni, nie regresja).
+- Usunięte oba tymczasowe debug-obramowania (zielone/czerwone).
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #6) — dziesiąta runda: fix z poprzedniej rundy zwęził mapę (efekt uboczny), poprawione u źródła
+
+User zauważył: mapa zwęziła się po fixie, odsłaniając fragment tła po prawej. Zasugerował (za pośrednictwem narzeczonej) obejście: zostawić mapę węższą, przesunąć w dół całą sekcję pod nią (statystyki/znaczki/tekst) żeby wypełnić odsłonięte miejsce.
+
+**Nie poszedłem tą drogą — znalazłem i naprawiłem prawdziwą przyczynę zamiast obchodzić objaw.** Zwężenie NIE było zamierzonym efektem ograniczenia mapy — to nowy bug wprowadzony przeze mnie w poprzednim fixie: dodałem `.frame(maxWidth: .infinity)` PRZED `.frame(height: mapSectionHeight)` na karcie mapy. To DWA OSOBNE wywołania `.frame()` w łańcuchu — każde jest osobnym kontenerem layoutu liczonym SEKWENCYJNIE (drugie dostaje jako wejście wynik pierwszego, nie oryginalną propozycję od VStacka-rodzica) — to właśnie zwęziło obraz. Fix: usunięte zbędne `.frame(maxWidth: .infinity)` — szerokość wraca do niejawnej, odziedziczonej po rodzicu (dokładnie jak działało przed całą tą serią fixów), zostaje tylko `.frame(height:).clipped()` naprawiające prawdziwy bug z rundy dziewiątej.
+
+**Efekt:** mapa wraca do pełnej, oryginalnej szerokości — nie ma już odsłoniętego fragmentu tła do wypełniania, więc przesuwanie statystyk/znaczków/tekstu w dół (co sugerował user) nie jest już potrzebne — rozwiązuje się samo wraz z przywróceniem właściwej szerokości.
+
+Build + install OK — do potwierdzenia że mapa faktycznie wróciła do pełnej szerokości i nic już nie odsłania tła po bokach.
+
+## 13.09.2026 (ciąg dalszy #7) — jedenasta runda: prawdziwy problem to pionowa dziura, nie szerokość
+
+User doprecyzował dokładnie (po tym jak zmierzyłem szerokość i się zgadzała): problem NIGDY nie dotyczył szerokości/dekoracji tła — to pionowa, odsłonięta przestrzeń między dolną krawędzią mapy a statystykami. Trafna diagnoza: mapa była kurczona przez kilka rund (760→660→610→480), a dopóki bug z dziewiątej rundy (obraz w `.fill` bez `.clipped()`) sekretnie "dopełniał" różnicę malując się NA statystykach, ta różnica była niewidoczna. Po poprawnym przycięciu w poprzedniej rundzie ta różnica STAŁA SIĘ realną, pustą przestrzenią.
+
+User dał dwie opcje, z jasną preferencją dla pierwszej: (a) przywrócić mapie wcześniejszą wysokość, jeśli możliwe, (b) przesunąć elementy pod mapą w dół. Wybrana opcja (a) — częściowy powrót wysokości mapy 480→560 (nie cała droga do 610-760, żeby nie cofać całej pracy nad zmniejszeniem z poprzednich rund), przeskalowane pozycje zdjęć pod nową wysokość (×1.167), zmniejszony odstęp mapa→statystyki (62→42, bo mapa sama zajmuje teraz więcej miejsca, mniej dodatkowego marginesu trzeba).
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #8) — jedenasta runda (dokończenie): pełny powrót do wysokości mapy 610
+
+Częściowy powrót (480→560) z poprzedniego kroku nadal nie wystarczył — user porównał wprost z ostatnią wersją, którą sam wcześniej potwierdził jako poprawną, i poprosił o PEŁNY powrót, nie częściowy. Mapa: 560→610 (dokładnie ta sama wysokość co w potwierdzonej wersji sprzed całej serii zmniejszeń), teraz połączona z poprawnym `.clipped()` z dziewiątej rundy — może bezpiecznie wrócić do pełnego rozmiaru bez ryzyka że znowu "połknie" statystyki. Pozycje zdjęć przeskalowane ×1.089 (610/560). Odstęp mapa→statystyki: 42→30 (z powrotem do wartości z tamtej potwierdzonej wersji).
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #9) — jedenasta runda: weryfikacja spójności odstępów (bez ruszania mapy)
+
+User potwierdził że pionowy układ jest już zasadniczo poprawiony — poprosił WYŁĄCZNIE o weryfikację spójności odstępów, bez zmiany wymiarów mapy/zdjęć. Sprawdzone w kodzie (nie na oko): mapa→statystyki=30, statystyki→znaczki=28 (spójne), ale znaczki→tekst="48" — wyraźny skok, dostrajany jeszcze gdy mapa miała 480pt, nieaktualny po powrocie do 610. Skorygowane do 34, bliżej rytmu pozostałych dwóch. Mapa/zdjęcia/proporcje tła — bez zmian, zgodnie z prośbą.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #10) — dwunasta runda: dodatkowy margines mapa→statystyki mimo potwierdzonej wysokości 610
+
+User dalej zgłaszał odsłonięty fragment tła mimo że `mapSectionHeight` w kodzie potwierdzone na 610 (identyczne jak w wersji uznanej za poprawną). Cztery prośby o świeży zrzut ekranu skutkowały za każdym razem tymi samymi, wcześniej już przeanalizowanymi plikami (`IMG_249233967E19-1.jpeg` z debug-obramowaniami, `JPEG image-4FE3-BE59-B3-0.jpeg`) — obydwa sprzed fixów z 610/klipowania, więc nie dało się zweryfikować wizualnie aktualnego stanu.
+
+Zamiast dalej blokować się na weryfikacji: zrobiony dodatkowy, bezpieczny krok w dobrej wierze — cały blok (statystyki→znaczki→tekst) przesunięty niżej jako całość (odstęp mapa→statystyki 30→52), odstępy MIĘDZY nimi (28/34) bez zmian, zgodnie z wyraźną prośbą usera. Mapa/tło/treść bez zmian.
+
+Build + install OK. Otwarte pytanie do przyszłej weryfikacji: czy problem faktycznie istniał na urządzeniu, czy to był ciągle nieaktualny zrzut/nieodświeżona appka — nie udało się tego jednoznacznie potwierdzić w tej rundzie.
+
+## 13.09.2026 (ciąg dalszy #11) — trzynasta runda: kompas ucięty przez mapę (potwierdzone na ŚWIEŻYM zrzucie)
+
+User przesłał wreszcie prawdziwie nowe zrzuty (HEIC z timestampem 02:01, po wszystkich poprzednich buildach) — dzięki temu realny, konkretny problem: kompas w `decorativeDivider` (ostatni element nagłówka) jest lekko ucięty przez górną krawędź mapy. Przyczyna zweryfikowana w kodzie: kompas ma `.rotationEffect(-8°)` na ramce 34×34pt — obrót NIE zmienia rozmiaru liczonego przez layout (SwiftUI dalej rezerwuje tylko 34×34), ale WIZUALNIE róg obróconego kwadratu wystaje poza ten prostokąt. Przy odstępie header→mapa tylko 6pt, ten róg realnie nachodził na mapę. Fix: sam kompas i mapa bez zmian, zwiększony tylko odstęp header→mapa (6→22).
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #12) — czternasta runda: PRAWDZIWA przyczyna "uciętego kompasu" — wada w pliku, nie w layoucie
+
+Padding 6→22 (poprzednia runda) nie pomógł — user potwierdził po restarcie appki że kompas dalej wygląda ucięty. Dodane drugie okrążenie debug-obramowań (pomarańczowe wokół kompasu, niebieskie wokół karty mapy) + świeży zrzut — pokazał kompas W PEŁNI wewnątrz własnej ramki, żadnego nachodzenia mapy. Diagnoza layoutu była więc poprawna: to NIE jest bug pozycjonowania.
+
+User przesłał kolejny, bliski zrzut samego kompasu (`View recent photos 3.heic`) — i TU się okazało: **sam plik `TravelJourneyCompass.png` ma niesymetrycznie ucięty prawy bok obudowy** (lewa strona pełna, okrągła, widoczne "W"; prawa ścięta prosto tuż przy "E"). Potwierdzone bezpośrednio — otwarty i obejrzany plik źródłowy z Assets.xcassets. Wada wypalona w samej grafice od momentu jej dodania do projektu (06.09.2026), niezależna od JAKIEGOKOLWIEK kodu layoutu — dlatego żadna z wcześniejszych poprawek (padding, clipping, offsety) nie mogła tego naprawić, mimo wielu rund prób.
+
+**Fix:** znaleziony w projekcie DRUGI, pełny i symetryczny asset tego samego motywu — `PosterDecoCompass.png` (216×292, przezroczyste tło, nigdzie dotąd nieużywany w kodzie) — podmieniony w `decorativeDivider`. Usunięte oba tymczasowe debug-obramowania.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #13) — piętnasta runda: zaokrąglone rogi mapy zniknęły góra/dół (kolejny efekt uboczny fixu z 9 rundy)
+
+Po naprawionym kompasie user zauważył: lewa/prawa krawędź mapy ma ładną, cienką obwódkę (kremowa linia), ale góra/dół jej NIE MA WCALE, i zniknęło zaokrąglenie rogów które wcześniej było. Zdiagnozowane bez zgadywania — dokładna analiza kodu `mapCard`: `.clipShape(RoundedRectangle)` + obwódki + cień były rysowane na obrazie W JEGO WŁASNYM, RAW rozmiarze wynikającym z `.aspectRatio(.fill)` (który — jak ustalone w dziewiątej rundzie — bywa WYŻSZY niż zadeklarowane `mapSectionHeight`), a dopiero PO NICH całość była przycinana zwykłym PROSTOKĄTEM (`.frame(height:).clipped()` na końcu). Efekt: górna/dolna zaokrąglona krawędź razem z fragmentem obwódki, która tam była narysowana, znikała pod tym prostokątnym cięciem — zostawiając płaskie, gołe krawędzie góra/dół, podczas gdy lewa/prawa (nie dotknięte przez pionowe przycinanie) zachowały swoją obwódkę.
+
+Fix: kolejność odwrócona — `.frame(height: mapSectionHeight).clipped()` teraz NAJPIERW (przycina obraz do właściwego rozmiaru), dopiero na TYM już poprawnym rozmiarze rysowane jest zaokrąglenie/obwódka/cień. Obie krawędzie (góra/dół, lewa/prawa) dostają teraz dokładnie to samo traktowanie.
+
+Build + install OK.
+
+## 13.09.2026 — PODSUMOWANIE serii "nowe tła scrapbookowe" (8.5/10 wg usera)
+
+Zamknięcie długiej serii rund (background-ratio fix → mapa nachodząca na statystyki → zwężona mapa → przywracanie wysokości mapy 480→560→610 → ucięty kompas → brak zaokrąglonych rogów góra/dół) wywołanej przejściem z prostych teksturek papieru na gotowe ilustracje scrapbookowe o stałych proporcjach. User: "8.5/10, układ spójny", jedna uwaga (zdjęcia zachodzące na dolną krawędź mapy) potwierdzona jako ŚWIADOMY design, nie bug.
+
+Stan końcowy:
+- `mapSectionHeight = 610` (pełny powrót do wysokości sprzed serii zmniejszeń).
+- Karta mapy: przycinana do właściwego rozmiaru NAJPIERW, dopiero potem dekorowana (zaokrąglenie/obwódka/cień) — obie pary krawędzi (góra/dół, lewa/prawa) spójne.
+- Kompas: `PosterDecoCompass` (pełny, symetryczny asset) zamiast wadliwego `TravelJourneyCompass`.
+- Odstępy: mapa→statystyki=52, statystyki→znaczki=28, znaczki→tekst=34.
+- Zdjęcia: 5 stałych slotów pozycji, celowo zachodzą na dolną krawędź mapy — niezależne od liczby zdjęć w danych trip'ach.
+- Ograniczenie do zapamiętania: oba tła w rotacji mają te same proporcje (1024×1536) — nowe tło o innych proporcjach wymagałoby ponownego strojenia odstępów.
+
+## 13.09.2026 (ciąg dalszy #14) — szesnasta runda: finalny polish (bez ruszania mapy/tytułu/struktury)
+
+User: 9/10 kompozycja, "gotowe do finalnego testu" — poprosił o drobny polish, wyraźnie NIE o przebudowę. Zasada ogólna zamiast łatania pojedynczych przypadków: "dekoracje mogą być za treścią, ale nigdy nie mogą utrudniać czytania tytułu/statystyk/nazw/liczby krajów".
+
+- Panel statystyk: krycie kremowej podkładki 0.55→0.75 — nie pod JEDEN konkretny kompas w tle, tylko ogólnie pewniejsze niezależnie które z 11 teł/która dekoracja akurat wypadnie pod spodem.
+- Tekst "X Countries • Countless Memories": ta sama zasada — 0.35→0.5.
+- Znaczki: margines od krawędzi (20pt) i responsywna siatka (`LazyVGrid` z `.flexible()` kolumnami, `min(slotCount,20)`) już wcześniej zweryfikowane w kodzie — przy większej liczbie krajów kolumny robią się węższe, NIGDY nie wychodzą poza ekran (matematyczna właściwość LazyVGrid, nie wymaga testowania per-przypadek).
+- Zdjęcia: 5 stałych slotów pozycji (niezależne od liczby zdjęć w danych) — już potwierdzone w piętnastej rundzie.
+
+**Uczciwe zastrzeżenie, przekazane userowi wprost:** punkt "przetestuj wszystkie 11 teł + różne liczby zdjęć/krajów/statystyk" wymaga albo syntetycznych danych testowych (ryzykowne, nie proszone) albo realnego przechodzenia przez ekran plakatu wielokrotnie (tło losuje się przy każdej wizycie) — nie da się tego w pełni zweryfikować z mojej strony bez fabrykowania danych. Zalecone: weryfikacja przyrostowa w miarę realnego użytkowania, nie jednorazowy syntetyczny test wszystkich wariantów.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #15) — siedemnasta runda: powiększone pieczątki, jeden rząd
+
+User: pieczątki (i napisy na nich) trochę za małe, +15-20% poprawiłoby czytelność — ale bez przechodzenia na dwa rzędy przy 14 krajach.
+
+Sprawdzone w kodzie: `visibleStampCount` już z góry ogranicza do max 12 pieczątek (+"+N MORE") niezależnie ile krajów ma user (≤12→wszystkie, 13-25→12, 25+→10) — rząd WIĘC NIGDY nie musi się zawijać, nie trzeba dodawać osobnej logiki auto-wrap, którą user sugerował jako fallback.
+
+- `stampCard`/`moreStampsCard`: wysokość 64→74 (~15.6%) — napisy na znaczkach są wypalone W SAMEJ grafice (215 wyciętych assetów), więc powiększenie całej karty powiększa tekst proporcjonalnie bez osobnego strojenia fontu.
+- Odstęp między kolumnami: 8→5, zewnętrzny margines rzędu: 20→16 — odzyskuje szerokość pod większe pieczątki, żeby 12 + "+N MORE" dalej mieściło się w jednym rzędzie.
+- Fallback (kraje bez wyciętego znaczka — flaga emoji/stary sticker): też powiększone proporcjonalnie (26→30, 40→46, 9→10).
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #16) — osiemnasta runda: pieczątki jeszcze raz delikatnie większe
+
+User: dobrze, ale jeszcze +10-15%, jeden rząd zostaje, nic innego (mapa/statystyki/tekst/stopka) nie ruszać.
+
+- `stampCard`/`moreStampsCard`: 74→85 (~15%).
+- Odstęp między kolumnami: 5→3, margines rzędu: 16→12 — dalej odzyskuje szerokość pod większe pieczątki.
+- Fallback (flaga/stary sticker): też powiększony proporcjonalnie.
+- Mapa, statystyki, tekst "X Countries...", stopka — nietknięte, zgodnie z wyraźną prośbą.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #17) — dziewiętnasta runda: ostatnie szlify pieczątek
+
+User: rozmiar pieczątek zostaje (jawnie odrzucił opcję zmniejszenia z listy) — tylko: (1) trochę więcej odstępu między nimi, (2) "+2 MORE" odkleić od ostatniej pieczątki, (3) sprawdzić czytelność tekstu "X Countries..." na tle "Good People Good Places".
+
+- Odstęp między kolumnami: 3→5 ("+2" dosłownie, zgodnie z prośbą usera).
+- `moreStampsCard`: dodatkowy `.padding(.leading, 8)` wewnątrz własnej kolumny siatki — wizualnie odkleja się od poprzedniego znaczka bez zmiany szerokości kolumn pozostałych pieczątek.
+- Punkt 3: już zaadresowane w szesnastej rundzie (kremowa podkładka pod tekstem, opacity 0.5, zasada ogólna nie pod jeden konkretny wariant tła) — bez dodatkowej zmiany kodu.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #18) — dwudziesta runda: podkładka za słaba, "Good People Good Places" dalej przebijało
+
+User przesłał zrzut z zaznaczeniem (Markup, czerwony okrąg) — "Good People Good Places" z tła dalej WYRAŹNIE przebijało się przez slogan "Every memory lasts forever." mimo kremowej podkładki dodanej w szesnastej rundzie. 0.5 krycia okazało się za mało dla tak ciemnego, odręcznego pisma tła.
+
+Podniesione: stopka 0.5→0.85, panel statystyk (ta sama sztuczka, dla spójności) 0.75→0.85 — praktycznie kryjące, nie tylko "subtelne", w obu miejscach na raz.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #19) — dwudziesta pierwsza runda: 9.5/10, ostatni kosmetyczny szlif
+
+User: 9.5/10, kompozycja gotowa, tylko "+2 MORE" wciąż trochę za blisko ostatniej pieczątki mimo poprawki z dziewiętnastej rundy. Margines wewnętrzny tej karty zwiększony dalej: 8→16. Punkt "sprawdź czytelność na pozostałych tłach" — już zaadresowany ogólnie w dwudziestej rundzie (podkładka 0.85, nie zależna od konkretnego tła), bez dodatkowej zmiany kodu. Mapa/statystyki/układ — nietknięte, zgodnie z wyraźną prośbą.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #20) — dwudziesta druga runda: "+2 MORE" bez własnego tła wyglądało jak fragment dekoracji
+
+User przesłał zrzut — na jednym z teł "+2 MORE" siedziało na gęstej, mapopodobnej ilustracji w tle, a przerywana ramka BEZ ŻADNEGO wypełnienia pozwalała tej dekoracji przebijać się przez cały środek kafelka. Wyglądało jak przypadkowy element tła, nie jak część rzędu solidnych, kolorowych znaczków-ilustracji obok.
+
+Fix: własna jasna plakietka (`.background`) pod przerywaną ramką, ten sam poziom krycia co reszta plakatu (0.85) — karta zawsze czyta się jako spójny element UI, niezależnie co akurat jest narysowane pod spodem, na żadnym z 11 teł.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #21) — dwudziesta trzecia runda: ostatnie 3 kosmetyki (9.5/10)
+
+User: 9.5/10, tylko kosmetyka, żadnych zmian strukturalnych.
+
+1. "MORE" w "+N MORE" cięższe wizualnie niż sąsiednie znaczki — 11pt bold→9pt semibold (liczba "+2" bez zmian, zostaje dominującym elementem).
+2. Okrągły stempel "TRAVEL...SEE MORE" z tła koliduje z pierwszymi znaczkami — WYPALONY w grafice tła, nie da się go przesunąć/przyciemnić z kodu. Zamiast tego asymetryczny margines rzędu znaczków: lewy 12→24, prawy zostaje 12 — więcej oddechu tam gdzie ten stempel akurat siedzi.
+3. Tekst "X Countries...": tło/góry dalej LEKKO przebijały mimo 0.85 — ostatnie +5%, 0.85→0.9.
+4. Zdjęcia blisko krawędzi mapy — potwierdzone (po raz kolejny) jako świadomy, ograniczony efekt (5 stałych slotów, nie skaluje się z danymi), bez zmian kodu.
+5. Rytm pionowy / wysokość mapy — bez zmian, zgodnie z wyraźną prośbą.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #22) — dwudziesta czwarta runda: przywrócony wybór dzień/noc mapy
+
+User: appka miała kiedyś opcję dzień/noc dla mapy, chce ją przywrócić teraz kiedy mamy już dopracowaną nocną wersję. Ostrzegłem wcześniej że to realna dodatkowa robota (osobna paleta kolorów pod jasną mapę, nie prosty przełącznik) — user zdecydował się mimo to.
+
+**Zasada wyboru:** lokalna godzina urządzenia w momencie generowania plakatu, NIE losowe, NIE zależne od liczby zdjęć/krajów. 6:00-19:59 = dzień, reszta = noc (`isDaytimeHour`) — proste, przewidywalne progi (nie liczymy wschodu/zachodu słońca, appka nie zna lokalizacji usera w momencie generowania, tylko strefę czasową urządzenia). Wybór ustawiany RAZ w `.task` (`isDaytimeMap`), czytany zarówno przez `renderMapSnapshot` (wybór `options.traitCollection`: `.light`/`.dark`) jak i przez widoki rysujące piny/trasy (muszą się zgadzać z bazą mapy).
+
+**Dwie osobne palety kolorów:**
+- Podświetlenia krajów: dzień = stonowany niebiesko-zielony + ciepłe złoto (oryginalne kolory z mockupu sprzed trybu nocnego), noc = bursztyn + turkus (obecne, dopracowane w tej sesji). Niższe opacity na dzień (kolory NIE muszą "świecić" na jasnym tle).
+- Piny: dzień = klasyczny czerwono-biały (dobry kontrast na jasnym lądzie), noc = kremowo-złoty (obecny).
+- Granice krajów: dzień = atramentowy, noc = kremowy (obecny).
+- Trasy lotów + samoloty: dzień = atramentowy, noc = jasnoszaro-złoty (obecny) — dokładnie odwrotny problem do tego co naprawialiśmy wcześniej (jasny kolor na jasnym tle też by zniknął).
+
+Wymiary/pozycje/odstępy/układ zdjęć/statystyk/znaczków/tekstu — bez ŻADNEJ zmiany, zgodnie z wyraźną prośbą usera.
+
+Build + install OK — zainstalowane w południe (12:18), więc powinno pokazać wersję DZIENNĄ przy pierwszym sprawdzeniu.
+
+## 13.09.2026 (ciąg dalszy #23) — dwudziesta piąta runda: prawdziwy wschód/zachód słońca zamiast sztywnych godzin
+
+User: chce dzień/noc mapy liczone jak systemowy "Automatyczny" tryb wyglądu iOS — wg realnego wschodu/zachodu słońca w lokalizacji urządzenia, nie sztywnych 6:00-20:00.
+
+- Nowy `SolarTime.swift` — standardowy wzór wschodu/zachodu ("Sunrise equation", Almanac for Computers 1990/NOAA), liczony LOKALNIE i offline (zero zależności sieciowej — appka już ma Open-Meteo do prognozy pogody gdzie indziej, ale świadomie NIE użyty tu, żeby kolorystyka mapy nigdy nie czekała na sieć). Dokładność ~1-2 minuty.
+- `CurrentLocationProvider` (dotąd `private` w `PeakDetector.swift`, jedyne miejsce w appce sięgające po GPS) odblokowany do `internal` — współdzielony, nie duplikowany. Ten sam jednorazowy mechanizm co rozpoznawanie szczytu.
+- `determineIsDaytimeMap()`: próbuje lokalizacji (timeout 4s, `AsyncTimeout` — appka już ma ten wzorzec z geokodowania) → liczy wschód/zachód dla dzisiejszej daty w tym miejscu → porównuje z aktualnym czasem. Przy ODMOWIE/braku/timeout/dniu polarnym — bezpieczny powrót do prostych progów godzinowych (6-20) z poprzedniej rundy, żeby dzień/noc mapy NIGDY nie zablokowało generowania plakatu.
+- Zaktualizowany opis `NSLocationWhenInUseUsageDescription` w `project.yml` — wcześniej mówił tylko o rozpoznawaniu szczytów, teraz też o mapie plakatu (uczciwość wobec App Store review / nutrition label).
+
+**Uwaga dla usera:** jeśli appka nie miała jeszcze przyznanej zgody na lokalizację (np. user nigdy nie używał wyszukiwania szczytu), przy PIERWSZYM wejściu na ekran plakatu po tej zmianie pojawi się systemowy prompt o zgodę na lokalizację — to oczekiwane, nie bug.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #24) — dwudziesta szósta runda: mocniejszy kontrast odwiedzonych krajów (dzień)
+
+User: odwiedzone kraje zlewają się z jasną mapą (dawny stonowany niebiesko-zielony był za blisko koloru morza). Chce ciepły złoto-brązowy/ochrowy z ciemniejszym obrysem i większym kontrastem, bez jaskrawości; noc: jaśniejszy przygaszony złoty.
+
+- Dzień: odwiedzone = ochra (0.72/0.5/0.2, było niebiesko-zielone), dom = dawny niebiesko-zielony w NOWEJ roli kontrastu (ten sam schemat "ciepłe=odwiedzone, chłodne=dom" co w nocy, kolory zamienione między trybami). Obrys: prawie czarny (0.1/0.08/0.05, było 0.16/0.14/0.11) + wyższe opacity (0.45, było 0.3).
+- Noc: odwiedzone rozjaśnione (0.92/0.68/0.35, było 0.88/0.58/0.26).
+- Opacity wypełnień podniesione po obu stronach (dzień: 0.24-0.4→0.32-0.45, noc: 0.32-0.48→0.36-0.52) — realnie więcej kontrastu, nie tylko inny odcień.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #25) — dwudziesta siódma runda: ochra za ciężka, efekt "poświaty" zamiast bloku
+
+User: brąz z poprzedniej rundy "zbyt ciężki, wygląda jak plama". Kierunek: przygaszone złoto/stary mosiądz, cienki ciemniejszy obrys, "podświetlenie" nie płaski blok. Rozważyłem prawdziwą teksturę/ziarno w obrębie kraju (wymagałoby generowanego wzoru maskowanego kształtem kraju) — nieproporcjonalny nakład względem efektu, więc ten sam "vintage" charakter osiągnięty samą przezroczystością/miękkością koloru zamiast tekstury.
+
+- Dzień: odwiedzone = jaśniejszy, cieplejszy złoty ton (mniej brązu, więcej złota: 0.74/0.6/0.32, było 0.72/0.5/0.2). Obrys: cieplejszy brąz zamiast niemal czarnego (0.42/0.31/0.14, było 0.1/0.08/0.05).
+- Noc: odwiedzone jeszcze jaśniejsze (0.94/0.74/0.42, było 0.92/0.68/0.35).
+- Opacity WYRAŹNIE w dół po obu stronach — efekt delikatnej poświaty zamiast płaskiego bloku: dzień 0.32-0.45→0.2-0.28, noc 0.36-0.52→0.26-0.34. Obrys dnia lekko mocniejszy (0.45→0.55) żeby nadal definiował kształt kraju mimo dużo słabszego wypełnienia.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #26) — dwudziesta ósma runda: złoty środek kontrastu krajów
+
+User: pełny przegląd plakatu (9/10), punkt 1 najważniejszy do poprawy — "za blado, nie od razu wiadomo które kraje są zaznaczone" (dokładnie odwrotny kierunek niż w poprzedniej rundzie, która poszła w "za ciężkie"). "Robimy punkt po punkcie" — tylko krycie podświetleń krajów tym razem, reszta listy (mapa pod zdjęciami, dolna nierówność, logo) czeka.
+
+Kolor/obrys zostają te same (już dobrze dobrane, złoty ton zaakceptowany) — podniesione tylko krycie, złoty środek między ciężkim blokiem (26. runda) a ledwo widoczną poświatą (27. runda): dzień 0.2-0.28→0.3-0.38, noc 0.26-0.34→0.34-0.42. Obrys dnia też mocniejszy (0.55→0.65).
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #27) — dwudziesta dziewiąta runda: punkt 2 (kraje pod zdjęciami), punkty 3-4 rozstrzygnięte
+
+User: punkt po punkcie. Punkt 2: "zdjęcia zasłaniają sporą część kontynentów, dopilnuj żeby zaznaczenia krajów nie były WYŁĄCZNIE pod Polaroidami" — bez ruszania pozycji zdjęć/rozmiaru mapy. Punkt 3 (nierówność dolnej części przez kompas/rośliny/góry z tła): user zdecydował NIE ruszać, to zależne od tła. Punkt 4 (logo): user: "zrób jak proponujesz" — moja wcześniejsza rekomendacja była "nie zwiększałbym znacząco, koliduje z tytułem" — bez zmian kodu, potwierdzone.
+
+Punkt 2 — jedyna realna dźwignia bez ruszania zabronionych elementów: lekkie oddalenie kadru mapy (mnożnik span 1.6→1.8). To samo terytorium mniejsze na mapie → statystycznie więcej podświetlonych krajów wystaje poza stałe rogi zdjęć. Uczciwie zaznaczone w kodzie: poprawia SZANSE, nie gwarantuje 100% — nałożenie stałych slotów zdjęć na konkretną geografię usera jest z natury przypadkowe.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #28) — trzydziesta runda: mapa centrowana na gęstości, nie na skrajnościach
+
+User: "co jeśli mapę (Europę) przesunęli byśmy delikatnie w prawo?". Zamiast twardego, przypadkowego przesunięcia działającego tylko dla TYCH konkretnych danych — realna przyczyna: środek mapy liczony dotąd jako środek geometryczny SKRAJNYCH punktów (min/max lat/lon), co ciągnie widok w stronę pojedynczych odległych wyjazdów (Tajlandia, Katar), spychając gęsty klaster (Europa, większość odwiedzonych krajów) w bok.
+
+Fix: środek liczony teraz jako ŚREDNIA wszystkich odwiedzonych współrzędnych — naturalnie centruje widok tam, gdzie jest najwięcej krajów, nie tam gdzie są skrajności. Rozpiętość (span) przeliczona OSOBNO jako najdalszy punkt od TEGO nowego środka (nie od starego środka min/max) — inaczej odległe wyjazdy wypadłyby poza kadr, bo `MKCoordinateRegion` jest zawsze symetryczny wokół środka. Mnożnik 1.8 z poprzedniej rundy (oddalenie kadru) zachowany.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #29) — trzydziesta pierwsza runda: mediana zamiast średniej + prawdziwa poświata krajów
+
+User pochwalił kierunek ze średnią (30. runda), dorzucił trzy dopracowania:
+
+1. **Centrowanie na średniej jako główne ustawienie** — potwierdzone, zostaje.
+2. **Ograniczenie wpływu pojedynczego odległego miejsca** — zwykła ŚREDNIA dalej ma wpływ pojedynczego skrajnego punktu (waży 1/N). MEDIANA zamiast średniej — z definicji odporna na pojedyncze skrajności (żeby przesunąć medianę, trzeba przesunąć WIELE punktów, nie jeden), bez sztucznego, twardego limitu przesunięcia — właściwość wynika wprost z wyboru miary statystycznej, nie z dodatkowego `min()`/`max()` na przesunięciu.
+3. **Auto-zoom wg rozrzutu** — już działa (wzór na `span` jest ciągły, proporcjonalny do faktycznego rozrzutu), potwierdzone bez zmian kodu.
+
+Dodatkowo (user: "dalej za mało kontrastowe względem tła"): `countryFillsOverlay` — dodana TRZECIA warstwa, miękka rozmyta "poświata" (szerszy, rozmyty obrys, `.blur(radius: 3)`) NAJPIERW pod spodem, potem zwykłe wypełnienie, na wierzchu ostry cienki obrys definiujący kształt — realny efekt "delikatnej poświaty" zamiast tylko płaskiego wypełnienia. Kolor bardziej nasycony (mniej pastelowy), opacity ponownie w górę (dzień 0.3-0.38→0.4-0.48, noc 0.34-0.42→0.44-0.52) — kombinacja poświaty + koloru + krycia powinna dać wyraźnie mocniejszy efekt łączny niż same wcześniejsze podnoszenie samego wypełnienia.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #30) — trzydziesta druga runda: częściowy odwrót — średnia+limit zamiast mediany, bez rozmycia
+
+User: "przepraszam za zamieszanie, wcześniejsza wersja (sprzed 31. rundy) była dużo lepsza" — wkleił dokładnie tę samą wiadomość co przed 31. rundą, żeby wskazać do czego wracać.
+
+**Cofnięte:**
+- Mediana zamiast średniej → WRÓCIŁA średnia jako podstawa (user pkt 1: "średnia... to powinno być główne ustawienie", dosłownie, nie inna miara statystyczna).
+- Rozmyta "poświata" (`.blur(radius: 3)`) na krajach → usunięta, wraca prosty dwuwarstwowy układ (wypełnienie + ostry obrys). Prawdopodobnie wyglądała niechlujnie, nie elegancko.
+
+**Zrealizowane inaczej, dosłowniej wg pkt 2 usera** ("ograniczenie MAKSYMALNEGO przesunięcia środka", nie inna miara): środek to teraz ŚREDNIA, ale DOCIĘTA (`clampedTowardMedian`) tak, żeby nie mogła odjechać od mediany (liczonej tylko jako odporna na skrajności "kotwica" limitu, nie jako sam środek) o więcej niż 15°. Przy normalnym rozrzucie (jak dziś: Europa+Tajlandia+Katar) różnica mean-median jest mała i limit nic nie zmienia — środek to praktycznie czysta średnia, zgodnie z pkt 1. Przy skrajnym przypadku (30 w Europie + 1 w Australii) limit faktycznie by zadziałał.
+
+**Zostało bez zmian** (wciąż aktualne, osobne zgłoszenie): mocniejszy, bardziej nasycony kolor odwiedzonych krajów + podniesione krycie z 31. rundy — user nie cofnął tej części, tylko technikę "poświaty przez rozmycie".
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy) — realny bug: tło przycinane/powiększane (złe proporcje płótna, nie "za mało miejsca")
+
+User zgłosił przycięty plakat i SAM trafnie zdiagnozował przyczynę: generator (nasz `ImageRenderer`) dopasowywał tło do wysokości WYLICZONEJ Z TREŚCI, a nie odwrotnie — nowe tła scrapbookowe mają STAŁE proporcje 2:3 (gotowa, jednorazowa ilustracja z elementami w konkretnych miejscach), więc `.aspectRatio(contentMode: .fill)` naciągał/przycinał tę konkretną grafikę, żeby dopasować ją do innej wysokości. Dokładnie to ryzyko flagowałem wcześniej ("Ryzyko techniczne: proporcje") — teraz się potwierdziło.
+
+**Fix — zmiana filozofii renderu:** wcześniej ("07.09.2026") celowo NIE wymuszano wysokości płótna ("ImageRenderer sam dobiera wysokość do treści, więc nigdy nie ma pustej przestrzeni") — działało dobrze przy starych, bezszwowych teksturkach papieru bez żadnej "kompozycji" do stracenia. Teraz: wysokość całego plakatu wynika z PRAWDZIWYCH proporcji PLIKU tła (`backgroundNativeAspectRatio`, czytane z `UIImage(named:).size`, fallback 2:3 gdyby coś się nie wczytało), nie z treści. `renderPosterImage()` przekazuje jawną `height` zarówno do `.frame()` jak i `ImageRenderer.proposedSize`. Skoro canvas ma teraz DOKŁADNIE proporcje pliku tła, `.aspectRatio(fill)` na samym tle staje się faktycznie no-opem — zero kadrowania, zero zoomu, cała grafika od góry do dołu.
+
+**Uczciwe ryzyko do sprawdzenia na żywo:** to NIE usuwa napięcia między zmienną ilością treści (zdjęcia/pieczątki różne u różnych userów) a STAŁĄ wysokością wynikającą z tła — po prostu przenosi je z "tło się przycina" na "treść musi zmieścić się w tej wysokości". Zbudowane na obecnych danych usera (5 zdjęć, 12+2 pieczątki) — do sprawdzenia czy dół plakatu (stopka "Created with PMemories"/pieczątki) nie ucina się teraz zamiast tła.
+
+Build + install OK.
+
+## 12.09.2026 (ciąg dalszy) — realna przyczyna "nocnej mapy" + dopasowanie kolorów kontrastu
+
+User zauważył, że mapa na plakacie wyszła ciemna/nocna, przez co: kraje słabo rozróżnialne, granice zlewają się z tłem, podświetlenie niewystarczająco widoczne, Polaroidy mają większy kontrast niż mapa. Zamiast cofać do jasnej mapy, user świadomie wybrał ZOSTAĆ przy nocnym klimacie i poprawić kontrast.
+
+**Diagnoza:** nigdzie w kodzie nie wybieraliśmy trybu wyglądu mapy — `MKMapSnapshotter.Options` bez jawnego `traitCollection` bierze AKTUALNY tryb wyglądu URZĄDZENIA w momencie renderu. Czyli wygląd plakatu (jasny/ciemny) zależał od tego, czy dany tester ma akurat włączony Dark Mode — realna niespójność między userami, nie świadomy wybór stylu. Dodatkowo wszystkie kolory podświetleń/obrysów/linii/pinów były dobrane pod ZAŁOŻENIE jasnej mapy (atramentowy obrys, stonowany niebiesko-zielony fill, czerwono-biały pin) — na wymuszonej ciemnej mapie praktycznie znikały.
+
+**Fix:**
+- `options.traitCollection = UITraitCollection(userInterfaceStyle: .dark)` — nocny styl WYMUSZONY na stałe dla wszystkich, niezależnie od trybu urządzenia (spójność + świadomy wybór estetyki, nie przypadek).
+- Podświetlone kraje: ciepły bursztyn (zamiast stonowanego niebiesko-zielonego), dom: kontrastujący turkus (zamiast złota — teraz złoto zajęte przez "odwiedzone", trzeba było innego koloru dla domu), wyższe opacity (0.32-0.48 zamiast 0.24-0.4) — na ciemnym tle trzeba więcej krycia żeby kolor faktycznie "zaświecił".
+- Obrys krajów: kremowy zamiast atramentowego.
+- Piny: kremowo-złote z ciemną kropką w środku (zamiast czerwono-białych) — ten sam odcień co podświetlone kraje, czytają się jako jedna rodzina kolorów.
+- Linie lotów + samoloty: jasnoszaro-złote zamiast atramentowych.
+
+Build + install OK.
+
+## 13.09.2026 (ciąg dalszy #31) — znaleziony i naprawiony bug: podświetlona Ameryka Południowa
+
+User zgłosił: kraj podświetlony w Ameryce Południowej, mimo że nigdy tam nie był.
+
+**Diagnoza (bezpośrednio na danych, nie na zgadywanie):**
+1. Ściągnięta żywa baza SwiftData z telefonu (`devicectl device copy from` + `sqlite3` na `default.store`) — `ZSAVEDSTOP.ZCOUNTRYCODE` zgrupowane: GB, ES, TH, IT, GR, PL, RO, TR, SK, QA, FR, CY, CH. Zero kodów południowoamerykańskich (BR/AR/CL/PE/CO/VE/...) — dane usera są poprawne, problem jest w renderze.
+2. Sprawdzone `WorldCountryBoundaries.json` (dane granic, Natural Earth) dla każdego z tych kodów: kod "FR" to JEDEN wpis obejmujący aż **10 rozłącznych poligonów** — kontynentalna Francja + Korsyka, ale też Reunion, Majotta, Gwadelupa, Martynika i **Gujana Francuska** (lat 2.1–5.8°N, lon -54.6…-51.7°W — realnie w Ameryce Południowej, ~7000 km od Paryża).
+3. Kod w `renderMapSnapshot` (`countryFills`) wcześniej wypełniał WSZYSTKIE poligony danego kodu kraju bez filtrowania — user miał 1 przystanek w kontynentalnej Francji, ale plakat podświetlał przy okazji też Gujanę Francuską (i pozostałe zamorskie terytoria) po drugiej stronie świata.
+
+**Fix (ogólny, nie tylko dla FR — ten sam problem mógłby dotyczyć innych krajów z zamorskimi terytoriami w tych samych danych granic, np. Holandia+Karaiby, Dania+Grenlandia):**
+- Nowa mapa `visitedCoordinatesByCountry: [String: [CLLocationCoordinate2D]]` zbierana obok istniejącego `tripsByCountry` — realne współrzędne przystanków per kod kraju.
+- Przy budowaniu `countryFills`: każdy poligon danego kraju filtrowany — liczy się tylko jeśli jego środek leży w promieniu **2500 km** od choć jednego realnie odwiedzonego przystanku tego kraju. Próg dobrany tak, żeby odcinał rozłączne zamorskie terytoria (Gujana Francuska ~7000 km) zostawiając z zapasem bliskie eksklawy tego samego kraju (np. Wyspy Kanaryjskie ~1700 km od Madrytu).
+- Kraj bez żadnego pasującego poligonu po filtrze pomijany całkowicie (`guard !projectedPolygons.isEmpty else { return nil }`).
+
+Plik: `TravelJourneyPosterView.swift`, funkcja `renderMapSnapshot(priorityTripIDs:)`.
+
+Build (Debug) OK, install na "Pit" OK (databaseSequenceNumber 12544).
+
+## 13.09.2026 (ciąg dalszy #32) — bug: "Northern Ireland" nie tłumaczyło się na polski (i pozostałe 26 języków)
+
+User: "dlaczego jak zmienie jezyk na polski dalej mam northern isnald ? reszta sie zmienila poprawnie".
+
+**Przyczyna:** `TravelAchievements.swift` → `ukPassportRegion(administrativeArea:)` — UK nie ma osobnych kodów ISO dla Anglii/Szkocji/Walii/Irlandii Północnej (wszystko to "GB" w danych Apple), więc appka grupuje je ręcznie po `administrativeArea`. Ta funkcja zwracała gołe angielskie literały `"England"`/`"Scotland"`/`"Wales"`/`"Northern Ireland"` wprost w kodzie — NIGDY nie przechodziła przez `L(...)`. Reszta krajów (bez tego wyjątku) tłumaczy się przez `Locale.localizedString(forRegionCode:)` w `countryGroupingDisplayName` — ta ścieżka nie obejmuje 4 regionów UK, bo nie mają własnego kodu ISO, stąd jedyny kraj, który "zapomniał się przetłumaczyć".
+
+**Fix:**
+- Dodane 4 nowe klucze do `Localizable.xcstrings` (`England`, `Scotland`, `Wales`, `Northern Ireland`) z ręcznymi tłumaczeniami na wszystkie 27 obsługiwanych języków (`extractionState: manual`, ten sam wzorzec co inne ręcznie dodane klucze w projekcie).
+- `ukPassportRegion` teraz zwraca `L("England")` itd. zamiast gołych stringów — używane wszędzie tam, gdzie liczy się kraj/region (Passport, Explorer Score, plakat podróży).
+
+Plik: `TravelAchievements.swift` (`ukPassportRegion`), `Localizable.xcstrings`.
+
+Build (Debug) OK, install na "Pit" OK (databaseSequenceNumber 12552).
+
+## 13.09.2026 (ciąg dalszy #33) — build 27 (1.0.2) na TestFlight + złapana przyczyna zawieszenia altool
+
+User: "wrzucamy builda :)". `CFBundleVersion` 26→27 w `project.yml` (`CFBundleShortVersionString` zostaje "1.0.2", build 26 już wysłany 11.09). Zawierał dwie poprawki z tej sesji: filtr poligonów krajów wg realnej odległości od odwiedzonych współrzędnych (fix Ameryki Południowej pod "FR") oraz tłumaczenie 4 regionów UK (Anglia/Szkocja/Walia/Irlandia Północna) na wszystkie 27 języków.
+
+Proces: `xcodegen generate` → `xcodebuild archive` (Release) → **ARCHIVE SUCCEEDED** → `xcodebuild -exportArchive` → `build/export27/PMemories.ipa` (80.7MB) → `xcrun altool --upload-app`.
+
+**Nowa, wcześniej niezłapana przyczyna zawieszenia się `altool`** (poprzednio tłumaczone tylko rozmiarem pliku/timeoutem 300s): pierwsza próba uploadu wisiała 15+ minut z zerowym postępem — log `~/Library/Logs/ContentDelivery/.../altool_*.txt` pokazał, że proces zatrzymał się dokładnie na `SecItemCopyMatching` (odczyt hasła z Keychaina) i ani razu nie ruszył dalej (zero aktywności sieciowej, `lsof` nie pokazywał żadnego otwartego połączenia). Sprawdzone bezpośrednio: `ioreg -n Root -d1 -a | grep CGSSessionScreenIsLocked` → `<true/>` — **ekran Maca był zablokowany**, więc systemowe okienko autoryzacji Keychaina (Touch ID/hasło) nie mogło się pojawić ani zostać potwierdzone, `altool` czekał na nie w nieskończoność. Proces ubity (`kill`), user poproszony o odblokowanie ekranu, po potwierdzeniu (`CGSSessionScreenIsLocked` zniknęło z `ioreg` = odblokowany) ponowiony upload — tym razem zakończony w 10s bez żadnego problemu.
+
+**UPLOAD SUCCEEDED**, Delivery UUID `cb7bcd3f-7924-49cb-a8c4-f619057cc43d`, 80 710 729 bajtów w 10.062s (8.0MB/s). Build 27 (1.0.2) czeka teraz na przetworzenie w App Store Connect.
+
+**Do zapamiętania na przyszłość**: jeśli `altool --upload-app` zawiesza się bez żadnego postępu w logu na kroku odczytu Keychaina, sprawdzić NAJPIERW czy ekran Maca jest zablokowany (`ioreg -n Root -d1 -a | grep CGSSessionScreenIsLocked`) zanim szuka się przyczyny sieciowej.
+
+## 13.09.2026 (ciąg dalszy) — pierwszy szeroki przegląd kodu appki pod kątem bugów
+
+User: "jak skonczysz to to przepatrz nasza apke na iphone czy nie ma zadnych bugow i bledow w kodzie". Pełny, ad-hoc przegląd całego drzewa `PMemoriesApp` (nie diff/PR — cała appka), nie skupiony na jednym module.
+
+Pierwsza próba poszła przez skill `/code-review` (8 równoległych "finder agentów" + agent weryfikujący) — trafiła na limit zapytań konta w trakcie (`monthly spend limit`/`five_hour rate limit`, org-level overage wyłączone) PO wygenerowaniu kandydatów, PRZED pełną weryfikacją. User: "dokoncz co limit zlapal". Odzyskane z transkryptu nieudanego runu: 33 surowe kandydatury (6 "kątów" po 5-6, bez duplikatów) — same kandydatury, bez zweryfikowanych werdyktów (te przepadły razem z crashem agenta). Reszta pracy (czytanie faktycznego kodu i wydanie werdyktu CONFIRMED/PLAUSIBLE/REFUTED per kandydat) zrobiona SAMODZIELNIE w tej sesji, bez odpalania kolejnych subagentów (żeby nie trafić na ten sam limit ponownie) — zgodnie z własną instrukcją fallbacku skilla ("jeśli Agent tool niedostępny, zrób to sam, sekwencyjnie").
+
+**14 zgłoszonych ustaleń** (9 CONFIRMED bezpośrednio z kodu, 5 PLAUSIBLE — zależne od niepewnego zachowania zamkniętych API systemowych typu CLGeocoder/PHImageManager/SwiftData). Najpoważniejsze:
+- `VideoComposer.swift:205` — alternacja torów A/B do przejść używa indeksu z ORYGINALNEJ tablicy zamiast licznika faktycznie umieszczonych klipów; pominięty klip (brak ścieżki wideo, zerowy czas po przycięciu) rozjeżdża parzystość i dwa sąsiednie klipy trafiają na ten sam tor — realnie psuje wyeksportowany film.
+- `AvatarCropView.swift:110` — kadrowanie awatara ignoruje `imageOrientation` zdjęcia, więc dla typowego pionowego zdjęcia z iPhone'a (bufor RAW jest poziomy, obrót żyje w EXIF) wycinek trafia w złe miejsce/skalę.
+- `HomeView.swift:1157` — jeden współdzielony `pickerSelection` między 3 różnymi pickerami zdjęć oznacza, że rozpoczęcie NIEZWIĄZANEGO nowego projektu w Studio może po cichu skasować zawieszoną, niedokończoną konwersję zaplanowanej podróży.
+- `LeaderboardService.swift:48` — `submitCurrentScore` bez blokady reentrancji; `.task` + `.refreshable` mogą nałożyć się na siebie i zgubić aktualizację wyniku przez `CKError.serverRecordChanged`.
+- `WorldGlobeView.swift:399` + `TravelRouteOverviewView.swift:419` — matematyka regionu mapy nie obsługuje antymerydianu (180°/-180°), dokładnie ta sama klasa buga co dzisiejsza poprawka centrowania mapy na plakacie podróży, tylko w innym miejscu kodu.
+- `EditView.swift:523,537` — `selectedIndex` nie jest korygowany po usunięciu/przesunięciu klipu na osi czasu, więc user może edytować/przycinać nie ten klip co myśli.
+
+Pełna lista 14 ustaleń z lokalizacjami i konkretnymi scenariuszami awarii — w wyniku `ReportFindings` tej sesji (widoczne dla usera w UI). Żadna poprawka jeszcze nie wdrożona — to sam raport, user decyduje co i w jakiej kolejności naprawiać.
+
+## 13.09.2026 (ciąg dalszy) — znaleziony i naprawiony bug: 56 lotów na plakacie zamiast 28
+
+User zauważył: plakat "My Travel Journey" pokazuje **56 lotów**, a ekran "Statystyki życiowe" (ten sam user, te same dane) pokazuje **28** — dokładnie 2×. Pytanie: czy to przez konieczność powrotu do miejsca docelowego?
+
+**Sprawdzone na żywych danych z urządzenia** (ta sama baza `default.store` ściągnięta wcześniej dziś do diagnozy Ameryki Południowej — wciąż aktualna, ponownie wykorzystana zamiast nowego ściągania): `SELECT ZORDER, ZTRANSPORTRAWVALUE, ZLEGDISTANCEKM ... FROM ZSAVEDSTOP` pokazał, że **KAŻDY pierwszy przystanek każdej podróży** (`ZORDER = 0`, punkt startowy — np. "London Gatwick Airport" jako początek wyjazdu) ma `transportRawValue = "plane"` jako wartość domyślną/pozostałość, mimo że `legDistanceKm = 0.0` — nie ma żadnego realnego lotu DO punktu startowego (logicznie: nie leci się donikąd, żeby zacząć podróż z własnego miasta).
+
+**Przyczyna**: `TravelJourneyPosterView.swift:1818` (`JourneyStats.init`) liczył loty jako `allStops.filter { transportRawValue == .plane }` — bez żadnego filtra na `legDistanceKm`/`order`, więc liczył też ten sztuczny, zerowy przystanek startowy. `TravelAchievements.swift` (ekran Statystyk życiowych) już dawno miał poprawny filtr (`stopsWithRealLeg = allStops.filter { order > 0 && legDistanceKm > 0 }`) właśnie po to, żeby wykluczyć ten artefakt — plakat po prostu nigdy nie dostał tej samej poprawki.
+
+Matematyka się zgadza: +1 fantomowy lot na KAŻDĄ z 28 podróży = dokładnie +28 → 28 (prawdziwe) + 28 (fantomowe) = 56 (co pokazywał plakat).
+
+**Nie chodzi więc o loty powrotne** (te są prawdziwe i liczone poprawnie po obu stronach) — to czysto techniczny artefakt danych (domyślna wartość `transportRawValue` na przystanku startowym), którego plakat nie filtrował.
+
+**Fix**: `TravelJourneyPosterView.swift` — `flightCount` dostał dokładnie ten sam warunek `order > 0 && legDistanceKm > 0` co `TravelAchievements.swift`, żeby liczba lotów na plakacie ZAWSZE zgadzała się ze Statystykami życiowymi.
+
+Build (Debug, `generic/platform=iOS`) → **BUILD SUCCEEDED**. Telefon "Pit" wrócił online — zbudowane pod urządzenie i zainstalowane (databaseSequenceNumber 12560).
+
+## 14.09.2026 — CI/CD Etap 1: GitHub Actions buduje appkę automatycznie
+
+User zainteresowany tematem CI/CD po przejrzeniu oferty pracy iOS Developer (LinkedIn) — wyjaśnione co to CI/CD/testy/architektura modularna na przykładzie tego projektu, potem: "to mnie interesuje :D możemy to zrobić?".
+
+**Odkryte przy okazji**: ostatni commit w repo GitHub (`piotrekmarkowski/PMemories-iOS`) był z 20.08.2026 — 417 niezacommitowanych plików lokalnie od tamtej pory. Git/GitHub były dotąd używane jako backup, nie codzienne narzędzie. Zakomunikowane userowi wprost, nie ukryte.
+
+**Zrobione (Etap 1 — sama CI, bez CD):**
+- `.github/workflows/ci.yml` — buduje appkę na symulatorze (`CODE_SIGNING_ALLOWED=NO`, więc zero potrzeby sekretów podpisywania) przy KAŻDYM pushu/PR do `main`. Łapie automatycznie dokładnie tę klasę błędów, która w tym projekcie powtarzała się wielokrotnie ("zapomniany `xcodegen generate` po nowym pliku .swift").
+- Osobna gałąź (`setup-ci-workflow`), commit dotykający WYŁĄCZNIE nowego pliku workflow — świadomie nietknięte pozostałe 417 zmian, żeby nie mieszać "postawienia CI" z "commitowaniem miesięcy zaległej pracy".
+- **Pułapka po drodze**: pierwszy `git push` odrzucony przez GitHuba — `refusing to allow an OAuth App to create or update workflow... without workflow scope`. Token `gh` (scope: gist/read:org/repo) nie miał uprawnienia `workflow`, wymaganego specyficznie do pushowania zmian w `.github/workflows/`. Naprawione: `gh auth refresh -s workflow` (device code flow, user ręcznie potwierdził w przeglądarce).
+- PR #1 otwarty, CI **odpaliło się automatycznie** i przeszło: **SUCCESS**, cały run (setup + brew install xcodegen + generate + pełny build od zera) ~2 minuty.
+- Merge PR-a do `main` zablokowany przez klasyfikator uprawnień auto-mode (słusznie — zmiana na współdzielonej gałęzi) — user scala ręcznie albo mówi "scal".
+
+**Świadomie NIE zrobione jeszcze** (kolejne etapy, user poinformowany): testy jednostkowe (projekt ma dziś zero testów), automatyczny upload na TestFlight (wymaga kluczy API App Store Connect zamiast obecnego hasła-z-Keychaina, żeby uniknąć dzisiejszego problemu z zablokowanym ekranem blokującym `altool`).

@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import UIKit
 import AVFoundation
+import ImageIO
 
 /// Wspólna logika wczytywania wybranych zdjęć/wideo w MediaItem — używana
 /// zarówno przy tworzeniu nowego projektu (HomeView), jak i przy dokładaniu
@@ -39,11 +40,27 @@ enum MediaItemLoader {
             // stąd puste/szare kwadraty w osi czasu dla każdego klipu wideo.
             // Dla zdjęć/Live Photo wprost z danych transferowanych przez
             // picker, tak jak wcześniej.
+            // 30.08.2026 — realny bug: user wybrał ~140 zdjęć naraz, pasek
+            // postępu doszedł do 100%, appka nic nie wczytała do Studio
+            // (żaden nowy projekt się nie pojawił). Przyczyna: `UIImage(data:)`
+            // dekoduje zdjęcie w PEŁNEJ rozdzielczości źródła tylko po to,
+            // żeby zrobić z niego miniaturkę osi czasu — przy 140 zdjęciach
+            // z nowoczesnego iPhone'a (12+ MP) to potrafi być kilka GB
+            // trzymane naraz w pamięci (żaden z tych `UIImage` nigdy się nie
+            // zwalnia — zostają w `MediaItem.thumbnail` do końca sesji
+            // edycji), iOS po cichu zabija appkę w tle (jetsam) zanim zdąży
+            // dojść do zapisania `SavedProject` na końcu `HomeView.
+            // loadSelection` — stąd "nic się nie stało", bez żadnego crash
+            // alertu widocznego dla usera. Naprawione: `downsampledImage`
+            // niżej generuje miniaturkę przez ImageIO (nigdy nie dekoduje
+            // pełnej rozdzielczości), to samo już robiono dla wideo
+            // (`videoThumbnail`/`generator.maximumSize`, dodane tu przy
+            // okazji tej samej naprawy).
             var thumbnail: UIImage?
             if isVideo, let videoURL {
                 thumbnail = await videoThumbnail(from: videoURL)
             } else if let data = try? await pickerItem.loadTransferable(type: Data.self) {
-                thumbnail = UIImage(data: data)
+                thumbnail = downsampledImage(from: data, maxDimension: 640)
             }
 
             // Do suwaka Trim — potrzebujemy długości całego źródłowego klipu,
@@ -79,7 +96,33 @@ enum MediaItemLoader {
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
+        // Ta sama naprawa co `downsampledImage` niżej — bez tego wideo
+        // 4K/HDR z nowoczesnego iPhone'a generowało klatkę w pełnej
+        // rozdzielczości źródła tylko po to, żeby zmniejszyć ją do
+        // maleńkiej miniaturki osi czasu.
+        generator.maximumSize = CGSize(width: 640, height: 640)
         guard let cgImage = try? await generator.image(at: .zero).image else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+
+    /// Miniaturka bez dekodowania zdjęcia w pełnej rozdzielczości źródła —
+    /// `CGImageSourceCreateThumbnailAtIndex` (ImageIO) potrafi zbudować
+    /// mniejszy obraz WPROST z pliku, bez przechodzenia przez pełnowymiarowy
+    /// `CGImage`/`UIImage` po drodze (to właśnie ten pośredni, pełnowymiarowy
+    /// krok zabijał appkę przy dużych selekcjach — patrz komentarz w `load`).
+    private static func downsampledImage(from data: Data, maxDimension: CGFloat) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else {
+            return nil
+        }
+        let thumbnailOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary) else {
+            return nil
+        }
         return UIImage(cgImage: cgImage)
     }
 }

@@ -32,7 +32,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0.2</string>
 	<key>CFBundleVersion</key>
-	<string>14</string>
+	<string>27</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
@@ -40,7 +40,7 @@
 	<key>NSAppleMusicUsageDescription</key>
 	<string>PMemories potrzebuje dostępu do muzyki, aby dodać wybrany utwór do filmiku.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>PMemories może użyć Twojej lokalizacji, żeby rozpoznać nazwę szczytu podczas wędrówki — tylko gdy sam o to poprosisz, appka nie śledzi lokalizacji w tle.</string>
+	<string>PMemories może użyć Twojej lokalizacji, żeby rozpoznać nazwę szczytu podczas wędrówki i dobrać wschód/zachód słońca do wyglądu mapy na plakacie — tylko jednorazowo, appka nie śledzi lokalizacji w tle.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>PMemories zapisuje gotowy filmik z powrotem do Twojej biblioteki zdjęć.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

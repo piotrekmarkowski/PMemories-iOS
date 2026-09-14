@@ -33,4 +33,14 @@ enum Palette {
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
+
+    /// Ramki Founder/Tester (28-29.08.2026, `TesterRegistry.Badge`,
+    /// zastąpione dokładnymi kolorami z mockupu usera 29.08.2026 —
+    /// pierwsza wersja `founderGradient` gold/accent była zgadnięta bez
+    /// referencji, user przesłał realny projekt: founder fioletowy,
+    /// tester niebieski, oba jako pełne, nasycone kolory, NIE gradient).
+    /// Wartości spróbkowane programowo z obrazka (ta sama metoda co
+    /// `AvatarFrame.color`), nie dobrane na oko.
+    static let founderAccent = rgb(0x74, 0x3E, 0xEC)
+    static let testerAccent = rgb(0x00, 0xA7, 0xFF)
 }

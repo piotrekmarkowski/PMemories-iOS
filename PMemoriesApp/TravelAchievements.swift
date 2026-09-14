@@ -163,13 +163,28 @@ struct ExplorerScore {
 }
 
 extension TravelAchievementsCalculator {
-    static func explorerScore(from trips: [SavedTrip]) -> ExplorerScore {
+    /// `projects` — Memories BEZ zaplanowanej trasy (30.08.2026, user: "wtedy
+    /// apka nie liczy juz km bo nie ma jak a liczy panstwa i miasta na tej
+    /// podstawie"). Km/przewyższenie/tryby transportu ZOSTAJĄ wyłącznie z
+    /// `SavedStop` (potrzebna kolejność/odcinki trasy, których surowe zdjęcie
+    /// nie ma) — TYLKO kraje/miasta dokładają też `SavedProject.
+    /// detectedCountryCode`/`detectedCityName` (patrz `EditView.
+    /// resolveMemoryLocationIfNeeded`). Projekty JUŻ powiązane z przystankiem
+    /// pomijane — ich kraj/miasto i tak już liczy się przez ten przystanek,
+    /// dublowanie zawyżałoby wynik.
+    static func explorerScore(from trips: [SavedTrip], projects: [SavedProject] = []) -> ExplorerScore {
         let allStops = trips.flatMap(\.stops)
         let stopsWithRealLeg = allStops.filter { $0.order > 0 && $0.legDistanceKm > 0 }
+        let linkedProjectIDs = Set(allStops.compactMap(\.linkedProjectID))
+        let unlinkedProjects = projects.filter { !linkedProjectIDs.contains($0.id) }
 
-        let countryCount = Double(Set(allStops.compactMap(\.countryCode)).count)
+        let countryCount = Double(Set(
+            allStops.compactMap { countryGroupingCode(countryCode: $0.countryCode, administrativeArea: $0.administrativeArea) }
+                + unlinkedProjects.compactMap(\.detectedCountryCode)
+        ).count)
         let cityCount = Double(Set(
-            allStops.map { $0.cityName.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty }
+            (allStops.map(\.cityName) + unlinkedProjects.compactMap(\.detectedCityName))
+                .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty }
         ).count)
         let distinctTransportModes = Double(Set(stopsWithRealLeg.map(\.transportRawValue)).count)
         let totalKm = allStops.reduce(0) { $0 + $1.legDistanceKm }
@@ -200,7 +215,21 @@ extension TravelAchievementsCalculator {
         let allStops = trips.flatMap(\.stops)
         var byCode: [String: (name: String, firstVisit: Date?)] = [:]
         for stop in allStops {
-            guard let code = stop.countryCode else { continue }
+            guard let rawCode = stop.countryCode else { continue }
+            // Wielka Brytania celowo rozdzielona na 4 osobne pieczątki
+            // (04.09.2026, user: mieszkaniec Szkocji ma zobaczyć "Szkocja",
+            // nie "UK") — Apple nie ma dla nich osobnych kodów ISO (wszystko
+            // to "GB"), więc grupowanie idzie po `administrativeArea` TYLKO
+            // dla tego jednego kraju. Reszta świata bez zmian, po `countryCode`.
+            let code: String
+            let displayName: String
+            if rawCode == "GB", let region = ukPassportRegion(administrativeArea: stop.administrativeArea) {
+                code = region.code
+                displayName = region.name
+            } else {
+                code = rawCode
+                displayName = stop.country ?? byCode[rawCode]?.name ?? rawCode
+            }
             let existing = byCode[code]
             let earliest: Date?
             switch (existing?.firstVisit, stop.arrivalDate) {
@@ -208,7 +237,7 @@ extension TravelAchievementsCalculator {
             case (let old, nil): earliest = old
             case (let old?, let new?): earliest = min(old, new)
             }
-            byCode[code] = (stop.country ?? existing?.name ?? code, earliest)
+            byCode[code] = (existing?.name ?? displayName, earliest)
         }
         return byCode.map { code, value in
             PassportCountry(countryCode: code, countryName: value.name, firstVisitDate: value.firstVisit)
@@ -219,6 +248,124 @@ extension TravelAchievementsCalculator {
             case (_, nil): return true
             }
         }
+    }
+    /// Mapuje `administrativeArea` z Apple na jedną z 4 nacji UK — Apple
+    /// zwraca dla brytyjskich adresów dokładnie te angielskie nazwy jako
+    /// pierwszy poziom regionu (nie hrabstwo, sam konstytucyjny kraj), stąd
+    /// proste dopasowanie stringów wystarcza. `nil` (region nierozpoznany,
+    /// np. stary wpis sprzed tej funkcji bez zapisanego `administrativeArea`)
+    /// = zostaje jako zwykłe "GB", zamiast zgadywać.
+    private static func ukPassportRegion(administrativeArea: String?) -> (code: String, name: String)? {
+        // 13.09.2026: user — "zmieniam język na polski, reszta się
+        // zmieniła poprawnie, tylko Northern Ireland zostaje po
+        // angielsku". Przyczyna: te 4 nazwy były wpisane jako gołe
+        // angielskie literały, nigdy nie przechodziły przez `L(...)` (w
+        // przeciwieństwie do reszty krajów, które idą przez
+        // `Locale.localizedString(forRegionCode:)` w `countryGroupingDisplayName`
+        // poniżej — UK nie ma osobnych kodów ISO dla tych 4 regionów,
+        // więc ta ścieżka ich nie obsługiwała). Klucze dodane ręcznie do
+        // `Localizable.xcstrings` (Anglia/Szkocja/Walia nie mają
+        // własnego ISO, systemowa baza `Locale` ich nie zna).
+        switch administrativeArea?.lowercased() {
+        case "england": return ("GB-ENG", L("England"))
+        case "scotland": return ("GB-SCT", L("Scotland"))
+        case "wales": return ("GB-WLS", L("Wales"))
+        case "northern ireland": return ("GB-NIR", L("Northern Ireland"))
+        default: return nil
+        }
+    }
+
+    /// Klucz "kraju" do liczenia WSZĘDZIE (Explorer Score, odznaka Country
+    /// Explorer, itd) — user 05.09.2026: "dlaczego liczenie ma być inne niż
+    /// pieczątki?", zgoda żeby były SPÓJNE. Ta sama logika co
+    /// `ukPassportRegion` w `passportCountries`, wydzielona żeby jedno miejsce
+    /// decydowało o grupowaniu wszędzie — Wielka Brytania liczy się jako 4
+    /// osobne "kraje" (po `administrativeArea`), reszta świata bez zmian.
+    static func countryGroupingCode(countryCode: String?, administrativeArea: String?) -> String? {
+        guard let countryCode else { return nil }
+        if countryCode == "GB", let region = ukPassportRegion(administrativeArea: administrativeArea) {
+            return region.code
+        }
+        return countryCode
+    }
+
+    /// Nazwa do wyświetlenia dla `countryGroupingCode` — "England"/"Scotland"
+    /// itd dla regionów UK (żeby nie pokazywały się 4 wiersze "United
+    /// Kingdom"), `fallback` (zwykle `stop.country`) dla reszty świata.
+    /// 12.09.2026, user (feedback narzeczonej o plakacie): podpisy zdjęć
+    /// mieszały języki w obrębie JEDNEJ wersji językowej appki ("Adeje,
+    /// Hiszpania" obok "Grecja" na angielskim plakacie). Przyczyna:
+    /// `fallback` to zwykle `stop.country` — surowy string z geokodowania
+    /// Apple Maps, zapisany W JĘZYKU AKTYWNYM W MOMENCIE DODAWANIA
+    /// przystanku (mógł być inny niż język appki TERAZ) — appka nigdy go
+    /// nie tłumaczyła, tylko wyświetlała verbatim. Fix: gdy appka zna
+    /// `countryCode`, nazwa kraju idzie przez wbudowaną w iOS bazę nazw
+    /// regionów (`Locale.localizedString(forRegionCode:)`) w JĘZYKU
+    /// AKTUALNIE AKTYWNYM w appce (`Bundle.main.preferredLocalizations`,
+    /// ten sam mechanizm co `isPolishLanguageActive`) — zawsze spójne z
+    /// resztą UI, niezależnie kiedy/w jakim języku przystanek dodano.
+    /// `fallback` zostaje jako ostatnia deska ratunku (kod bez znanego
+    /// tłumaczenia albo brak `countryCode` w ogóle).
+    static func countryGroupingDisplayName(countryCode: String?, administrativeArea: String?, fallback: String) -> String {
+        if countryCode == "GB", let region = ukPassportRegion(administrativeArea: administrativeArea) {
+            return region.name
+        }
+        if let countryCode {
+            let languageCode = Bundle.main.preferredLocalizations.first ?? "en"
+            if let localized = Locale(identifier: languageCode).localizedString(forRegionCode: countryCode) {
+                return localized
+            }
+        }
+        return fallback
+    }
+
+    /// Czy `cityName` jest w RZECZYWISTOŚCI samą nazwą kraju (np. gdy
+    /// geokodowanie nie znalazło żadnej miejscowości dla odległego miejsca
+    /// bez zaludnienia — plaża, szczyt — i appka zapisała samą nazwę kraju
+    /// jako "miasto") — sprawdzone WE WSZYSTKICH 27 obsługiwanych językach,
+    /// nie tylko dokładne dopasowanie stringów (12.09.2026, zgłoszony bug:
+    /// "Grecja, Greece" — `cityName` zapisany po polsku w momencie dodania
+    /// przystanku, `countryName` policzony w AKTUALNYM języku appki
+    /// (angielski) — proste porównanie stringów nie widziało że to TO SAMO).
+    /// Używane w podpisach zdjęć na plakacie, żeby nigdy nie dublować kraju.
+    static func cityNameIsJustCountryName(_ cityName: String, countryCode: String?) -> Bool {
+        guard let countryCode else { return false }
+        let trimmed = cityName.trimmingCharacters(in: .whitespaces)
+        for language in AppLanguage.allCases where language != .system {
+            if let localized = Locale(identifier: language.rawValue).localizedString(forRegionCode: countryCode),
+               localized.caseInsensitiveCompare(trimmed) == .orderedSame {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Skraca administracyjne nazwy tajskiego wzorca "Mueang X District"
+    /// (dosłownie "gmina miejska X, dystrykt") do samego "X" — user
+    /// (13.09.2026): "Mueang Chiang Rai District, Thailand" wyraźnie
+    /// dłuższy i cięższy od pozostałych podpisów zdjęć na plakacie, chce
+    /// po prostu "Chiang Rai". Wąski, bezpieczny wzorzec — sprawdza
+    /// dokładny prefiks/sufiks, więc NIE rusza np. angielskiego "Lake
+    /// District" (nie zaczyna się od "Mueang").
+    static func shortenedThaiDistrictName(_ raw: String) -> String {
+        guard raw.hasPrefix("Mueang "), raw.hasSuffix(" District") else { return raw }
+        return String(raw.dropFirst("Mueang ".count).dropLast(" District".count))
+    }
+
+    /// Nazwy przystanków, które są lotniskiem/tranzytem, nie prawdziwym celem
+    /// podróży — "Gatwick" to realne miasteczko w Anglii i appka geokoduje
+    /// przystanek lotniska pod tą nazwą bez słowa "Airport". Jedno miejsce dla
+    /// całej appki (wcześniej prywatna kopia w `TravelJourneyPosterView`).
+    static let knownAirportOnlyNames: Set<String> = [
+        "gatwick", "heathrow", "luton", "stansted", "southend", "schiphol",
+        "orly", "fiumicino", "changi", "narita", "haneda",
+    ]
+
+    static func looksLikeAirport(_ cityName: String) -> Bool {
+        let lower = cityName.lowercased()
+        if lower.contains("airport") || lower.contains("lotnisko") { return true }
+        let firstToken = lower.split(separator: ",").first.map(String.init) ?? lower
+        return knownAirportOnlyNames.contains(firstToken.trimmingCharacters(in: .whitespaces))
     }
 }
 
@@ -302,7 +449,9 @@ extension TravelAchievementsCalculator {
         // "Globtroter"/"Skoczek miejski" — liczone PER PODRÓŻ (nie suma
         // życiowa jak zwykłe odznaki Kraje/Miasta) — chodzi o RÓŻNORODNOŚĆ
         // JEDNEGO wyjazdu, nie o łączny dorobek.
-        let hasMultiCountryTrip = trips.contains { Set($0.stops.compactMap(\.countryCode)).count >= 3 }
+        let hasMultiCountryTrip = trips.contains {
+            Set($0.stops.compactMap { countryGroupingCode(countryCode: $0.countryCode, administrativeArea: $0.administrativeArea) }).count >= 3
+        }
         if hasMultiCountryTrip {
             badges.append(HiddenBadge(
                 id: "globetrotter", emoji: "🌎", title: L("Globetrotter"),
@@ -415,7 +564,7 @@ extension TravelAchievementsCalculator {
     static func wrapped(for targetYear: Int, from trips: [SavedTrip]) -> TravelWrapped {
         let yearTrips = trips.filter { year(of: $0) == targetYear }
         let yearStops = yearTrips.flatMap(\.stops)
-        let countryCount = Set(yearStops.compactMap(\.countryCode)).count
+        let countryCount = Set(yearStops.compactMap { countryGroupingCode(countryCode: $0.countryCode, administrativeArea: $0.administrativeArea) }).count
         let cityCount = Set(
             yearStops.map { $0.cityName.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty }
         ).count
@@ -486,15 +635,21 @@ enum TravelAchievementsCalculator {
         // Kraje — grupowanie po `countryCode`, jeden wiersz per kraj z liczbą
         // odwiedzonych miast w tym kraju (nie jeden wiersz per przystanek).
         let countryRows: [AchievementDetailRow] = {
-            var byCode: [String: (name: String, cities: Set<String>)] = [:]
+            var byCode: [String: (name: String, flagCode: String, cities: Set<String>)] = [:]
             for stop in allStops {
-                guard let code = stop.countryCode else { continue }
+                guard let rawCode = stop.countryCode,
+                      let code = countryGroupingCode(countryCode: rawCode, administrativeArea: stop.administrativeArea)
+                else { continue }
                 let cityKey = stop.cityName.trimmingCharacters(in: .whitespaces)
-                byCode[code, default: (stop.country ?? code, [])].cities.insert(cityKey)
+                // `flagCode` zawsze prawdziwy ISO (do emoji flagi) — nawet gdy
+                // `code` to syntetyczny klucz regionu UK ("GB-ENG"), bo
+                // `flagEmoji` umie tylko prawdziwe 2-znakowe kody.
+                let displayName = countryGroupingDisplayName(countryCode: rawCode, administrativeArea: stop.administrativeArea, fallback: stop.country ?? code)
+                byCode[code, default: (displayName, rawCode, [])].cities.insert(cityKey)
             }
             return byCode.sorted { $0.value.name < $1.value.name }.map { code, value in
                 AchievementDetailRow(
-                    emoji: CityGeocoder.flagEmoji(countryCode: code),
+                    emoji: CityGeocoder.flagEmoji(countryCode: value.flagCode),
                     title: value.name,
                     subtitle: value.cities.count == 1 ? L("1 city") : "\(value.cities.count) \(L("cities"))",
                     trailing: nil
@@ -557,9 +712,10 @@ enum TravelAchievementsCalculator {
                 )
             }
 
-        let countryCount = Double(Set(allStops.compactMap(\.countryCode)).count)
+        let countryCount = Double(countryRows.count)
         let cityCount = Double(cityRows.count)
         let flightCount = Double(stopsWithRealLeg.filter { $0.transportRawValue == TransportMode.plane.rawValue }.count)
+        let planeKm = distance(forRawValues: [TransportMode.plane.rawValue])
         let carKm = distance(forRawValues: [TransportMode.car.rawValue])
         let trainKm = distance(forRawValues: [TransportMode.train.rawValue])
         let waterKm = distance(forRawValues: [TransportMode.boat.rawValue, TransportMode.cruise.rawValue])
@@ -586,6 +742,16 @@ enum TravelAchievementsCalculator {
                         milestones: [10, 50, 150, 300, 500], currentValue: cityCount, detailRows: cityRows),
             Achievement(id: "flights", emoji: "✈️", title: L("Flights"), unit: "", detailNoun: "flights",
                         milestones: [5, 25, 75, 200, 500], currentValue: flightCount,
+                        detailRows: transportRows([TransportMode.plane.rawValue])),
+            // 28.08.2026, user: "nie mamy km przebytych samolotem, mamy
+            // przeloty ale nie km" — "Flights" wyżej liczy TYLKO liczbę
+            // lotów, nigdy dystansu. Brakujący odpowiednik "By Plane" (km),
+            // dokładnie ten sam wzorzec co "By Car"/"By Train"/"By Water"/
+            // "Hiking" niżej — bez tego lista środków transportu z km miała
+            // dziurę tylko przy samolocie, mimo że dane (`legDistanceKm` per
+            // odcinek) były już zbierane, tylko nigdzie nie zsumowane.
+            Achievement(id: "planeKm", emoji: "🛫", title: L("By Plane"), unit: "km", detailNoun: nil,
+                        milestones: [1000, 5000, 20000, 75000, 200000], currentValue: planeKm,
                         detailRows: transportRows([TransportMode.plane.rawValue])),
             Achievement(id: "trips", emoji: "🗺️", title: L("Trips"), unit: "", detailNoun: "trips",
                         milestones: [5, 20, 50, 100, 250], currentValue: tripCount, detailRows: tripRows),

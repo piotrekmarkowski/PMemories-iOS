@@ -18,11 +18,11 @@ targets:
         NSPhotoLibraryUsageDescription: "PMemories potrzebuje dostępu do zdjęć i filmów, aby połączyć je w filmik."
         NSPhotoLibraryAddUsageDescription: "PMemories zapisuje gotowy filmik z powrotem do Twojej biblioteki zdjęć."
         NSAppleMusicUsageDescription: "PMemories potrzebuje dostępu do muzyki, aby dodać wybrany utwór do filmiku."
-        NSLocationWhenInUseUsageDescription: "PMemories może użyć Twojej lokalizacji, żeby rozpoznać nazwę szczytu podczas wędrówki — tylko gdy sam o to poprosisz, appka nie śledzi lokalizacji w tle."
+        NSLocationWhenInUseUsageDescription: "PMemories może użyć Twojej lokalizacji, żeby rozpoznać nazwę szczytu podczas wędrówki i dobrać wschód/zachód słońca do wyglądu mapy na plakacie — tylko jednorazowo, appka nie śledzi lokalizacji w tle."
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         CFBundleShortVersionString: "1.0.2"
-        CFBundleVersion: "14"
+        CFBundleVersion: "27"
         ITSAppUsesNonExemptEncryption: false
         LSSupportsOpeningDocumentsInPlace: true
         # Wysyłanie zaplanowanej podróży do kogoś innego (11.08.2026) —
@@ -77,15 +77,48 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: "YES"
         ENABLE_PREVIEWS: "YES"
+  # CI/CD Etap 2 (14.09.2026) — pierwsze prawdziwe testy jednostkowe.
+  # Świadomie zaczynamy od CZYSTYCH funkcji (`TravelAchievementsCalculator`,
+  # `Season`, `SolarTime`) — zero zależności od SwiftData/ModelContext, więc
+  # test uruchamia się natychmiast, bez scaffoldingu bazy w pamięci. Testy
+  # operujące na `SavedTrip`/`SavedStop` (np. `flightCount` z dzisiejszego
+  # buga) to naturalny Etap 3, gdy dojdzie in-memory `ModelContainer`.
+  PMemoriesAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: PMemoriesAppTests
+    dependencies:
+      - target: PMemoriesApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.piotrmarkowski.pmemories.Tests
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        # Test MUSI być "hosted" (uruchamiać się wewnątrz procesu appki) —
+        # próba samodzielnego bundla ("TEST_HOST: ''") kompilowała się, ale
+        # padała na linkowaniu ("Undefined symbol") — `PMemories.app` to
+        # zwykły plik wykonywalny appki, nie eksportuje symboli jak
+        # biblioteka, więc `@testable import` bez hostingu nie ma jak się
+        # podpiąć. XcodeGen domyślnie liczy TEST_HOST na bazie NAZWY TARGETU
+        # ("PMemoriesApp"), a nie prawdziwego PRODUCT_NAME appki
+        # ("PMemories") — stąd jawna, poprawna ścieżka poniżej zamiast
+        # polegania na domyślnym zgadywaniu.
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/PMemories.app/PMemories"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        GENERATE_INFOPLIST_FILE: "YES"
 schemes:
   PMemoriesApp:
     build:
       targets:
         PMemoriesApp: all
+        PMemoriesAppTests: [test]
     run:
       config: Debug
     test:
       config: Debug
+      targets:
+        - PMemoriesAppTests
     profile:
       config: Release
     analyze:

@@ -22,6 +22,23 @@ final class CitySearchCompleter: NSObject, ObservableObject, MKLocalSearchComple
         completer.queryFragment = query
     }
 
+    /// Preferuje podpowiedzi BLISKO podanej współrzędnej — bez tego
+    /// `MKLocalSearchCompleter.region` zostaje domyślnie na całym świecie,
+    /// więc niejednoznaczna nazwa (03.09.2026, realny bug: user wybrał
+    /// "Ibiza Town", appka rozwiązała to do miejsca w Indiach, 8329 km od
+    /// poprzedniego przystanku — najwyraźniej istnieje TAM osiedle/miejsce o
+    /// tej samej nazwie) mogła dostać ranking od Apple równy albo wyższy niż
+    /// oczywiste, bliskie trasie miejsce. Region to PODPOWIEDŹ rankingu, nie
+    /// twardy filtr — appka wciąż pozwoli wybrać coś naprawdę odległego
+    /// (prawdziwy lot międzykontynentalny), tylko przestaje faworyzować
+    /// przypadkowe, dalekie trafienia o tej samej nazwie.
+    func biasRegion(near coordinate: CLLocationCoordinate2D?) {
+        guard let coordinate else { return }
+        completer.region = MKCoordinateRegion(
+            center: coordinate, latitudinalMeters: 3_000_000, longitudinalMeters: 3_000_000
+        )
+    }
+
     func clear() {
         completer.queryFragment = ""
         results = []
@@ -51,7 +68,7 @@ final class CitySearchCompleter: NSObject, ObservableObject, MKLocalSearchComple
     /// daje nazwę w poprawnym języku niezależnie od regionu telefonu.
     /// `nil` gdy geokodowanie zawiedzie — wołający zostawia wtedy
     /// dotychczasową (surową) nazwę zamiast nadpisywać pustką.
-    static func resolve(_ completion: MKLocalSearchCompletion) async -> (coordinate: CLLocationCoordinate2D, country: String?, countryCode: String?, localizedCityName: String?)? {
+    static func resolve(_ completion: MKLocalSearchCompletion) async -> (coordinate: CLLocationCoordinate2D, country: String?, countryCode: String?, localizedCityName: String?, administrativeArea: String?)? {
         let request = MKLocalSearch.Request(completion: completion)
         let search = MKLocalSearch(request: request)
         guard let response = try? await search.start(), let item = response.mapItems.first else { return nil }
@@ -64,7 +81,7 @@ final class CitySearchCompleter: NSObject, ObservableObject, MKLocalSearchComple
         // Pomijana dla POI (`item.pointOfInterestCategory != nil`) — surowy
         // tytuł z podpowiedzi zostaje bez zmian.
         let localizedCityName = item.pointOfInterestCategory == nil ? await localizedCityName(for: coordinate) : nil
-        return (coordinate, item.placemark.country, item.placemark.isoCountryCode, localizedCityName)
+        return (coordinate, item.placemark.country, item.placemark.isoCountryCode, localizedCityName, item.placemark.administrativeArea)
     }
 
     /// Nazwa miasta dla ZNANEJ współrzędnej, w języku APPKI — wydzielone z

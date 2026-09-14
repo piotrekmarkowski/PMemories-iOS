@@ -72,6 +72,18 @@ final class SavedProject {
     /// Library mogło pokazać przycisk odtwarzania. `nil` = jeszcze
     /// niewyeksportowany.
     var exportedAssetIdentifier: String?
+    /// Kraj/miasto wykryte z GPS zdjęć TEGO projektu (30.08.2026, user:
+    /// "chodzi o punktacje tylko za panstwa i miasta bo bez mapy km nie
+    /// liczymy") — TYLKO dla projektów BEZ powiązanego przystanku Travel Map
+    /// (te już mają swój kraj/miasto przez `SavedStop`, liczenie by
+    /// dublowało). Rozwiązane RAZ, przy eksporcie (`EditView.
+    /// resolveMemoryLocationIfNeeded`), nie liczone na żywo w
+    /// `TravelAchievementsCalculator.explorerScore` — odwrotne geokodowanie
+    /// jest sieciowe/asynchroniczne, a punktacja musi zostać szybka,
+    /// synchroniczna funkcja (wołana z wielu miejsc UI). `nil` = jeszcze
+    /// nierozwiązane albo zdjęcia bez GPS.
+    var detectedCountryCode: String?
+    var detectedCityName: String?
     @Relationship(deleteRule: .cascade, inverse: \SavedMediaItem.project)
     var items: [SavedMediaItem] = []
     @Relationship(deleteRule: .cascade, inverse: \SavedCaption.project)

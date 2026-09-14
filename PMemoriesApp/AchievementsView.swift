@@ -26,7 +26,7 @@ struct AchievementsView: View {
     }
 
     private var explorerScore: ExplorerScore {
-        TravelAchievementsCalculator.explorerScore(from: savedTrips)
+        TravelAchievementsCalculator.explorerScore(from: savedTrips, projects: savedProjects)
     }
 
     private var unlockedCount: Int {
@@ -104,6 +104,14 @@ struct AchievementsView: View {
                     TravelWrappedView()
                 } label: {
                     SecondaryLinkRow(emoji: "📅", title: L("Travel Wrapped"))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal)
+
+                NavigationLink {
+                    TravelJourneyPosterView()
+                } label: {
+                    SecondaryLinkRow(emoji: "🗺️", title: L("My Travel Journey"))
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal)

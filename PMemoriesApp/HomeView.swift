@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import SwiftData
+import CoreLocation
 
 /// Ekran startowy — "Dashboard": powitanie, duże CTA "Create Memory" (nie
 /// "New Project" — user: "nie sprzedajesz projektu, sprzedajesz
@@ -37,15 +38,57 @@ struct HomeView: View {
     /// Library zamiast wymuszać wybór jednego.
     @State private var pendingLibraryHighlightIDs: [UUID] = []
     @State private var pendingShowWorldGlobe = false
-    @State private var isShowingOnThisDayPicker = false
-    /// "Convert Trip → Memory" z Trip Planning (11.08.2026) — patrz komentarz
-    /// przy `TravelMapView.pendingPrefillStops`.
-    @State private var pendingTravelMapPrefillStops: [TripStop]?
+    /// Zakres dat do przeszukania w `OnThisDaySuggestedPhotosView` (05.09.2026,
+    /// user: "apka ma dostęp do zdjęć nie może tego sama sobie znaleźć?") —
+    /// `nil` = arkusz zamknięty, ustawiony = sygnał otwarcia z konkretnym
+    /// zakresem tej podróży (patrz `onThisDayDateRange(for:)` niżej).
+    @State private var onThisDaySuggestionRange: ClosedRange<Date>?
+    /// 23.08.2026 — realny bug report: tester nie miał ŻADNEGO sposobu na
+    /// usunięcie porzuconych/zdublowanych projektów widocznych w "Recent
+    /// Projects" (`StudioProjectRow` był zwykłym `Button`, bez swipe/trash).
+    /// Usuwanie już istniało w `LibraryView`, ale user nie musi wiedzieć że
+    /// to ten sam typ danych pod inną zakładką — akcja powinna być tam gdzie
+    /// user faktycznie na nią patrzy. Osobny `@State` (nie bezpośrednie
+    /// `modelContext.delete` z rzędu) — potwierdzenie przed usunięciem,
+    /// żeby przypadkowe tapnięcie nie skasowało czyjegoś niedokończonego
+    /// projektu bez ostrzeżenia.
+    @State private var deletingProject: SavedProject?
+    /// "Create Memory" z karty "Welcome back"/Trip Planning (09.09.2026,
+    /// przeprojektowane po buggu: wizyta w Braszowie zniknęła bezpowrotnie,
+    /// bo poprzednia wersja (`convertPlannedTrip`) OD RAZU kasowała
+    /// `PlannedTrip` i przenosiła na Travel Map, żeby user zbudował trasę —
+    /// wyjście z ekranu bez zapisania trasy ("po prostu nie chciałem
+    /// tworzyć memories") traciło dane bezpowrotnie, mimo że user nic
+    /// świadomie nie skasował. DRUGI problem, ten sam dzień: user "przy
+    /// create memoriec powinno Cie przeniesc do studio nie do mapy" — ten
+    /// przycisk ma NAPRAWDĘ tworzyć film, nie tylko prefillować budowanie
+    /// trasy. Rozwiązanie: zwykły `PhotosPicker` (cała biblioteka, bez
+    /// prefiltrowania po dacie — user: "jak bedzie wybierac zle zdjecie nie
+    /// bedziemy sie z tym bawic", czyli świadomie NIE automatyczne zgadywanie
+    /// zdjęć z okresu podróży), `PlannedTrip` kasowana DOPIERO w
+    /// `loadSelection`, PO faktycznym utworzeniu `SavedProject` — więc samo
+    /// wyjście z pickera bez wybrania zdjęć zostawia `PlannedTrip` nietkniętą.
+    @State private var convertingPlannedTrip: PlannedTrip?
+    @State private var isShowingConvertedTripPicker = false
+    /// Most między `TripPlanningView` (osobny ekran/zakładka) a powyższym —
+    /// TripPlanningView nie ma dostępu do `convertingPlannedTrip` lokalnego
+    /// tu w Home, więc przekazuje samo ID przez zakładkę, a Home odbiera je
+    /// w `.onChange(of: selectedTab)` i sam sobie dociąga żywy obiekt.
+    @State private var pendingCreateMemoryFromPlannedTripID: UUID?
     /// Indeks aktualnie pokazywanej statystyki w karcie "Your Journey" —
     /// TODO.md/UI.md 27.07.2026: "kafelek cyklicznie zmienia statystykę".
     @State private var journeyStatIndex = 0
     @State private var globeRotationDegrees: Double = 0
     @State private var avatarImage: UIImage? = AvatarStorage.load()
+    /// Ramka awatara (29.08.2026, `AvatarFrame`) — ten sam klucz
+    /// `UserDefaults` co `ProfileView`, więc wybór tam natychmiast
+    /// odświeża też ten mały awatar na Home.
+    @AppStorage("selectedAvatarFrame") private var selectedAvatarFrameRawValue: String = AvatarFrame.none.rawValue
+
+    private var selectedAvatarFrame: AvatarFrame {
+        AvatarFrame(rawValue: selectedAvatarFrameRawValue) ?? .none
+    }
+
     /// Losowany raz na otwarcie appki — UI.md 27.07.2026: "zmiana TREŚCI
     /// powitania, nie tylko rozmiaru", żeby nie było zawsze tym samym
     /// zdaniem. Świadomie NIE rotuje W TRAKCIE patrzenia (jak kafelek
@@ -70,9 +113,11 @@ struct HomeView: View {
                 case .studio: studioTab
                 case .travel: TravelMapView(
                     selectedTab: $selectedTab, pendingLibraryHighlightIDs: $pendingLibraryHighlightIDs,
-                    pendingShowWorldGlobe: $pendingShowWorldGlobe, pendingPrefillStops: $pendingTravelMapPrefillStops
+                    pendingShowWorldGlobe: $pendingShowWorldGlobe
                 )
-                case .tripPlanning: TripPlanningView(selectedTab: $selectedTab, pendingTravelMapPrefillStops: $pendingTravelMapPrefillStops)
+                case .tripPlanning: TripPlanningView(
+                    selectedTab: $selectedTab, pendingCreateMemoryFromPlannedTripID: $pendingCreateMemoryFromPlannedTripID
+                )
                 case .library: LibraryView(
                     highlightedProjectIDs: $pendingLibraryHighlightIDs,
                     onOpenProject: { project in Task { await openProject(project) } }
@@ -83,6 +128,22 @@ struct HomeView: View {
                 guard !newSelection.isEmpty else { return }
                 Task { await loadSelection(newSelection) }
             }
+            // TripPlanningView przekazuje samo ID przez zakładkę (nie ma
+            // dostępu do `convertingPlannedTrip`, lokalnego tu w Home) —
+            // patrz komentarz przy `pendingCreateMemoryFromPlannedTripID`.
+            .onChange(of: selectedTab) { _, newTab in
+                guard newTab == .home, let tripID = pendingCreateMemoryFromPlannedTripID else { return }
+                pendingCreateMemoryFromPlannedTripID = nil
+                let descriptor = FetchDescriptor<PlannedTrip>(predicate: #Predicate { $0.id == tripID })
+                guard let trip = try? modelContext.fetch(descriptor).first else { return }
+                convertPlannedTrip(trip)
+            }
+            .photosPicker(
+                isPresented: $isShowingConvertedTripPicker, selection: $pickerSelection,
+                selectionBehavior: .ordered, matching: .any(of: [.images, .videos]), photoLibrary: .shared()
+            )
+            .task { cleanupEmptyProjects() }
+            .task { await backfillMissingUKRegions() }
             .safeAreaInset(edge: .bottom) {
                 BottomTabBar(selectedTab: $selectedTab)
             }
@@ -118,6 +179,17 @@ struct HomeView: View {
                 Button("OK") {}
             } message: {
                 Text(importTripError ?? "")
+            }
+            .confirmationDialog(
+                L("Delete this project?"),
+                isPresented: Binding(get: { deletingProject != nil }, set: { if !$0 { deletingProject = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button(L("Delete"), role: .destructive) {
+                    if let deletingProject { modelContext.delete(deletingProject) }
+                    deletingProject = nil
+                }
+                Button(L("Cancel"), role: .cancel) { deletingProject = nil }
             }
         }
     }
@@ -216,7 +288,7 @@ struct HomeView: View {
                     // nazwy appki.
                     (Text("P").foregroundStyle(Palette.blue)
                      + Text("M").foregroundStyle(Palette.purple)
-                     + Text("emories").foregroundStyle(AppSkin.isAnySkinActive ? .white : .primary))
+                     + Text("emories").foregroundStyle(AppSkin.skinAwareTextColor()))
                         .font(.system(size: 20, weight: .bold, design: .rounded))
                         .shadow(color: .black.opacity(AppSkin.isAnySkinActive ? 0.35 : 0), radius: 4, y: 1)
                     Spacer()
@@ -227,44 +299,55 @@ struct HomeView: View {
                     Button {
                         isShowingProfile = true
                     } label: {
-                        ZStack(alignment: .bottomTrailing) {
-                            // Obwódka w gradiencie PM (01.08.2026, zewnętrzny
-                            // feedback: "od razu wygląda bardziej premium") —
-                            // tylko na prawdziwym zdjęciu, inicjał na gradiencie
-                            // już MA kolor marki jako całe tło.
+                        // Rozmiar 30→72pt (30.08.2026, user: "trochę bym go
+                        // zwiększył... Founder badge trochę ginie" — Profile
+                        // 84pt zostaje bez zmian, tylko Home). Czcionki
+                        // wewnątrz (inicjał/`person.fill`) przeskalowane w
+                        // tej samej proporcji (×2.4), odznaka skaluje się
+                        // automatycznie razem z `avatarSize` w
+                        // `AvatarFrameOverlay` — nic osobno nie trzeba
+                        // dostrajać.
+                        Group {
                             if let avatarImage {
                                 Image(uiImage: avatarImage)
                                     .resizable()
                                     .aspectRatio(contentMode: .fill)
-                                    .frame(width: 30, height: 30)
-                                    .clipShape(Circle())
-                                    .overlay(Circle().strokeBorder(Palette.heroGradient, lineWidth: 1.5))
+                                    .avatarFramedPhoto(selectedAvatarFrame, size: 72)
                             } else if let initial = AuthManager.shared.displayName?.first {
                                 // BUG znaleziony 09.08.2026 — zahardcodowane "P"
                                 // (ta sama klasa błędu co powitanie "Good
                                 // afternoon, Piotr"), patrz `ProfileView.swift`.
                                 Text(String(initial))
-                                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                                    .font(.system(size: 36, weight: .bold, design: .rounded))
                                     .foregroundStyle(.white)
-                                    .frame(width: 30, height: 30)
+                                    .frame(width: 72, height: 72)
                                     .background(Palette.heroGradient, in: Circle())
                             } else {
                                 Image(systemName: "person.fill")
-                                    .font(.system(size: 14))
+                                    .font(.system(size: 34))
                                     .foregroundStyle(.white)
-                                    .frame(width: 30, height: 30)
+                                    .frame(width: 72, height: 72)
                                     .background(Palette.heroGradient, in: Circle())
                             }
-                            // Odznaka testera (TODO.md 08.08.2026,
-                            // `TesterRegistry`) — mała gwiazdka, bo cały
-                            // awatar tu ma tylko 30pt, pełna odznaka jak w
-                            // `ProfileView` by go zasłoniła.
-                            if TesterRegistry.isTester(AuthManager.shared.userIdentifier) {
-                                Image(systemName: "star.circle.fill")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.white, Palette.purple)
-                                    .background(Circle().fill(.white))
-                                    .offset(x: 3, y: 3)
+                        }
+                        // Odznaka wybranej ramki/testera/foundera (TODO.md
+                        // 08.08.2026, priorytet odwrócony 30.08.2026 — patrz
+                        // komentarz w `ProfileView`: WŁASNY wybór usera
+                        // wygrywa zawsze, korona/fiolka to tylko domyślny
+                        // wygląd Foundera/Testera). `.overlay`, NIE sibling
+                        // w ZStack (odznaka ramki wystaje poza samo zdjęcie).
+                        .overlay {
+                            if selectedAvatarFrame != .none {
+                                AvatarFrameBadge(frame: selectedAvatarFrame, avatarSize: 72)
+                            } else {
+                                switch TesterRegistry.badge(for: AuthManager.shared.userIdentifier) {
+                                case .founder:
+                                    AvatarFrameOverlay(color: Palette.founderAccent, iconName: "crown.fill", avatarSize: 72)
+                                case .tester:
+                                    AvatarFrameOverlay(color: Palette.testerAccent, iconName: "testtube.2", avatarSize: 72)
+                                case .none:
+                                    EmptyView()
+                                }
                             }
                         }
                     }
@@ -288,7 +371,8 @@ struct HomeView: View {
                     UpcomingTripCard(
                         trip: featuredPlannedTrip,
                         onTap: { selectedTab = .tripPlanning },
-                        onCreateMemory: { convertPlannedTrip(featuredPlannedTrip) }
+                        onCreateMemory: { convertPlannedTrip(featuredPlannedTrip) },
+                        onDismissMemoryPrompt: { dismissMemoryPrompt(featuredPlannedTrip) }
                     )
                 } else {
                     PlanTripPromptCard { selectedTab = .tripPlanning }
@@ -348,50 +432,78 @@ struct HomeView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
-                        Text("Studio")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                // 24.08.2026 — user: kosz zawsze widoczny obok każdego
+                // projektu "wygląda jak przez przypadek można kliknąć",
+                // wolał przesunięcie jak w Library (`.swipeActions`, jedyny
+                // sposób usuwania w reszcie appki). `.swipeActions` działa
+                // TYLKO w prawdziwym `List` — stąd cała ta sekcja (dawniej
+                // `ScrollView`/`VStack`) przebudowana na `List`, ten sam
+                // wzorzec stylowania co `LibraryView.projectsList`
+                // (`.listRowSeparator(.hidden)`/`.listRowBackground(.clear)`/
+                // `.listRowInsets` na każdym wierszu, żeby wyglądało
+                // identycznie jak poprzednio, nie jak systemowa lista).
+                List {
+                    Text("Studio")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .skinAwareHeading()
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 20, leading: 20, bottom: 0, trailing: 20))
+
+                    continueEditingCard
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 16, leading: 20, bottom: 0, trailing: 20))
+
+                    if !otherProjects.isEmpty {
+                        Text("Recent Projects")
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
                             .skinAwareHeading()
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets(top: 16, leading: 20, bottom: 0, trailing: 20))
 
-                        continueEditingCard
-
-                        if !otherProjects.isEmpty {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Recent Projects")
-                                    .font(.system(size: 18, weight: .bold, design: .rounded))
-                                    .skinAwareHeading()
-                                VStack(spacing: 8) {
-                                    ForEach(otherProjects) { project in
-                                        StudioProjectRow(project: project) {
-                                            Task { await openProject(project) }
-                                        }
-                                    }
+                        ForEach(otherProjects) { project in
+                            StudioProjectRow(project: project, onOpen: {
+                                Task { await openProject(project) }
+                            })
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    deletingProject = project
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
                                 }
                             }
                         }
-
-                        PhotosPicker(
-                            selection: $pickerSelection,
-                            selectionBehavior: .ordered,
-                            matching: .any(of: [.images, .videos]),
-                            photoLibrary: .shared()
-                        ) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "plus.circle")
-                                Text("New Project")
-                            }
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Palette.blue)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        }
                     }
-                    .padding(20)
+
+                    PhotosPicker(
+                        selection: $pickerSelection,
+                        selectionBehavior: .ordered,
+                        matching: .any(of: [.images, .videos]),
+                        photoLibrary: .shared()
+                    ) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "plus.circle")
+                            Text("New Project")
+                        }
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Palette.blue)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 16, leading: 20, bottom: 20, trailing: 20))
                 }
+                .listStyle(.plain)
             }
         }
+        .scrollContentBackground(.hidden)
         .tabSkinBackground()
     }
 
@@ -435,6 +547,52 @@ struct HomeView: View {
     /// pierwszym na liście (np. najnowszy jest już skończony).
     private var otherProjects: [SavedProject] {
         savedProjects.filter { $0.id != continuableProject?.id }
+    }
+
+    /// 23.08.2026 — realny bug report: znajoma testera miała w "Recent
+    /// Projects" kilka pustych ("0 clips") projektów, zaśmiecających listę,
+    /// bez ŻADNEGO sposobu żeby się ich pozbyć zanim dodaliśmy ikonkę kosza
+    /// (wyżej). Automatyczne czyszczenie WYŁĄCZNIE dla projektów które
+    /// nigdy nie miały żadnej treści I nigdy nie zostały wyeksportowane —
+    /// zero ryzyka skasowania czegoś co user faktycznie zaczął albo
+    /// dokończył. Projekty z realną treścią (nawet zdublowane po nieudanym
+    /// eksporcie) NIE są tu ruszane — do tego służy teraz ręczna ikonka
+    /// kosza, bo appka nie wie która kopia jest "tą właściwą".
+    /// `.task` na `HomeView` (żyje przez cały czas życia appki) — odpala się
+    /// raz przy starcie, wystarczy żeby posprzątać już istniejące śmieci u
+    /// osób które zainstalowały ten build na appce z wcześniejszym stanem.
+    private func cleanupEmptyProjects() {
+        let empties = savedProjects.filter { $0.items.isEmpty && $0.exportedAssetIdentifier == nil }
+        guard !empties.isEmpty else { return }
+        for project in empties { modelContext.delete(project) }
+        try? modelContext.save()
+    }
+
+    /// 05.09.2026 — realny bug: Travel Passport pokazywał osobną, "nierozpoznaną"
+    /// pieczątkę "United Kingdom" OBOK już poprawnie rozdzielonych
+    /// England/Northern Ireland — bo ten jeden przystanek zapisano ZANIM
+    /// dodaliśmy pole `administrativeArea` (rozdział UK na 4 nacje), więc
+    /// zostaje mu tylko surowe `countryCode == "GB"` bez regionu (patrz
+    /// komentarz przy `ukPassportRegion` w `TravelAchievements.swift`).
+    /// Uzupełnia brakujący region wstecznie przez odwrotne geokodowanie
+    /// zapisanych współrzędnych — raz na start, tylko dla przystanków którym
+    /// go faktycznie brakuje, żeby stemple i statystyki (Explorer Score,
+    /// Country Explorer) od razu się zgadzały bez ręcznej edycji trasy.
+    private func backfillMissingUKRegions() async {
+        let stopsNeedingRegion = savedTrips.flatMap(\.stops).filter {
+            $0.countryCode == "GB" && $0.administrativeArea == nil
+        }
+        guard !stopsNeedingRegion.isEmpty else { return }
+        let geocoder = CLGeocoder()
+        var didUpdate = false
+        for stop in stopsNeedingRegion {
+            guard let placemark = try? await geocoder.reverseGeocodeLocation(
+                CLLocation(latitude: stop.latitude, longitude: stop.longitude)
+            ).first, let area = placemark.administrativeArea else { continue }
+            stop.administrativeArea = area
+            didUpdate = true
+        }
+        if didUpdate { try? modelContext.save() }
     }
 
     /// Prawdziwa karta "Continue Editing" — pokazuje ostatnio edytowany
@@ -824,7 +982,10 @@ struct HomeView: View {
         }
         // "Welcome back" (niedawno zakończona) — DRUGI priorytet, przed
         // nadchodzącymi: user właśnie wrócił, to najbardziej aktualna rzecz.
-        if let justCompleted = plannedTrips.filter(\.justCompleted)
+        // Wyciszona (`isMemoryPromptDismissed`) pomijana tutaj CAŁKOWICIE —
+        // inaczej blokowała pokazanie kolejnej, nadchodzącej podróży w
+        // nieskończoność (patrz komentarz przy tym polu).
+        if let justCompleted = plannedTrips.filter({ $0.justCompleted && !$0.isMemoryPromptDismissed })
             .max(by: { ($0.effectiveEndDate ?? .distantPast) < ($1.effectiveEndDate ?? .distantPast) }) {
             return justCompleted
         }
@@ -839,11 +1000,17 @@ struct HomeView: View {
     /// bezpośrednio wywołać, to prywatna funkcja INNEGO widoku), więc
     /// świadomie zduplikowany, krótki kod zamiast przedwczesnej abstrakcji
     /// między dwoma miejscami.
+    private func dismissMemoryPrompt(_ trip: PlannedTrip) {
+        trip.isMemoryPromptDismissed = true
+        try? modelContext.save()
+    }
+
     private func convertPlannedTrip(_ trip: PlannedTrip) {
-        let prefill = trip.asTripStops
-        pendingTravelMapPrefillStops = prefill
-        modelContext.delete(trip)
-        selectedTab = .travel
+        // `PlannedTrip` NIE jest kasowana tutaj — patrz komentarz przy
+        // `convertingPlannedTrip`. Kasowana dopiero w `loadSelection`, po
+        // faktycznym utworzeniu filmu.
+        convertingPlannedTrip = trip
+        isShowingConvertedTripPicker = true
     }
 
     private var onThisDaySection: some View {
@@ -853,30 +1020,59 @@ struct HomeView: View {
                 .skinAwareHeading()
             VStack(spacing: 10) {
                 ForEach(onThisDayMatches) { match in
-                    OnThisDayCard(match: match) { handleOnThisDayTap(match) }
+                    OnThisDayCard(match: match, onTap: { handleOnThisDayTap(match) }, onDismiss: { dismissOnThisDay(match) })
                 }
             }
         }
-        .photosPicker(
-            isPresented: $isShowingOnThisDayPicker,
-            selection: $pickerSelection,
-            selectionBehavior: .ordered,
-            matching: .any(of: [.images, .videos]),
-            photoLibrary: .shared()
-        )
+        .sheet(isPresented: Binding(
+            get: { onThisDaySuggestionRange != nil },
+            set: { if !$0 { onThisDaySuggestionRange = nil } }
+        )) {
+            if let range = onThisDaySuggestionRange {
+                OnThisDaySuggestedPhotosView(dateRange: range)
+            }
+        }
+    }
+
+    /// Okno dat do przeszukania Zdjęć dla danego dopasowania "On This Day" —
+    /// PIERWSZA wersja próbowała rozciągać okno na zakres CAŁEJ podróży (od
+    /// pierwszego do ostatniego `arrivalDate` wśród jej przystanków), żeby
+    /// złapać zdjęcia z wielodniowego pobytu. To dwukrotnie się nie
+    /// sprawdziło (05.09.2026, user: najpierw "2000+ niezwiązanych zdjęć"
+    /// przy podróży z podejrzanie szerokim zakresem dat, potem — nawet PO
+    /// zabezpieczeniu do ≤30 dni — dalej "zdjęcia niezwiązane z tym dniem",
+    /// bo zakres całej podróży to wciąż NIE to samo co "ten dzień"). "On
+    /// This Day" z definicji dotyczy JEDNEGO konkretnego dnia — więc okno to
+    /// zawsze dokładnie ten dzień (00:00–24:00 lokalnie) dopasowanego
+    /// przystanku, bez prób zgadywania szerszego zakresu podróży.
+    private func onThisDayDateRange(for match: OnThisDayMatch) -> ClosedRange<Date> {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: match.visitDate)
+        let end = calendar.date(byAdding: .day, value: 1, to: start) ?? match.visitDate
+        return start...end
     }
 
     /// Film już istnieje dla tej podróży → prosto do niego w Library (ten
     /// sam mechanizm co World Globe). Filmu jeszcze nie ma → zwykły picker
     /// "Create Memory" (`pickerSelection` ma już `.onChange` wyżej, który
     /// odpala `loadSelection` — ta karta nie duplikuje tej logiki).
+    /// Wyciszenie karty "On This Day" — patrz komentarz przy `OnThisDayCard.
+    /// onDismiss`. `PersistentIdentifier` → prawdziwy `SavedStop` przez
+    /// `modelContext.model(for:)`, żeby ustawić flagę na tym samym obiekcie
+    /// który już jest w bazie (nie kopia).
+    private func dismissOnThisDay(_ match: OnThisDayMatch) {
+        guard let stop = modelContext.model(for: match.stopID) as? SavedStop else { return }
+        stop.isHiddenFromOnThisDay = true
+        try? modelContext.save()
+    }
+
     private func handleOnThisDayTap(_ match: OnThisDayMatch) {
         guard match.linkedProjectIDs.isEmpty else {
             pendingLibraryHighlightIDs = match.linkedProjectIDs
             selectedTab = .library
             return
         }
-        isShowingOnThisDayPicker = true
+        onThisDaySuggestionRange = onThisDayDateRange(for: match)
     }
 
     private func statPill(icon: String, value: String) -> some View {
@@ -956,6 +1152,13 @@ struct HomeView: View {
         modelContext.insert(newProject)
         editingProject = newProject
 
+        // Kasowanie `PlannedTrip` źródłowa DOPIERO tutaj, po faktycznym
+        // utworzeniu filmu — patrz komentarz przy `convertingPlannedTrip`.
+        if let convertingPlannedTrip {
+            modelContext.delete(convertingPlannedTrip)
+            self.convertingPlannedTrip = nil
+        }
+
         isShowingEdit = true
 
         Task { await applyLocationBasedTitle(to: newProject) }
@@ -981,6 +1184,15 @@ struct HomeView: View {
         isLoadingProject = true
         loadingProjectProgress = 0
         defer { isLoadingProject = false }
+        // Ten sam brakujący fragment co `loadSelection` miał przed
+        // 10.08.2026 (realny bug report testera: "Export failed" /
+        // "Operation Stopped" po otwarciu ZAPISANEGO projektu do edycji —
+        // dokładnie ta ścieżka). `loadSelection`/`EditView.addMore` dostały
+        // tę blokadę tego dnia, `openProject` został pominięty mimo że
+        // ściąga te same pliki z iCloud (`MediaAssetLoader.loadMediaItems`)
+        // i może trwać równie długo.
+        UIApplication.shared.isIdleTimerDisabled = true
+        defer { UIApplication.shared.isIdleTimerDisabled = false }
         editingItems = await MediaAssetLoader.loadMediaItems(from: project.items, onProgress: { progress in
             loadingProjectProgress = progress
         })
@@ -1069,50 +1281,70 @@ private struct OnThisDayCard: View {
     /// jeszcze nie ma — otwiera zwykły picker "Create Memory", żeby user
     /// mógł od razu zacząć bez szukania przycisku niżej na ekranie.
     let onTap: () -> Void
-    @State private var weather: TravelTimeMachineProvider.HistoricalWeather?
+    /// Ukrywa TĘ kartę na stałe (05.09.2026, user: "10 lat temu byłem w innym
+    /// związku i nie chcę z tego robić memories") — appka nie może wiedzieć
+    /// KTÓRE wspomnienia są niechciane, więc daje userowi wprost sposób na
+    /// wyciszenie pojedynczego dopasowania, zamiast zgadywać albo chować
+    /// całą sekcję "On This Day".
+    let onDismiss: () -> Void
 
     private var yearsAgoText: String {
         match.yearsAgo == 1 ? L("1 year ago") : "\(match.yearsAgo) \(L("years ago"))"
     }
 
+    /// "Grecja (Sellia) — 10 lat temu" (05.09.2026, user: chce widzieć KRAJ,
+    /// nie tylko nazwę miasta która może nic nie mówić) — miasto w
+    /// nawiasie tylko gdy różni się od kraju (np. lotniska/regiony gdzie
+    /// `cityName` i `country` już są tym samym słowem nie dublują się).
+    private var placeText: String {
+        guard let country = match.country, !country.isEmpty, country != match.cityName else {
+            return match.cityName
+        }
+        return "\(country) (\(match.cityName))"
+    }
+
     private var actionLabel: String {
-        match.linkedProjectIDs.isEmpty ? L("Create memory again") : L("Open memory")
+        match.linkedProjectIDs.isEmpty ? L("Browse photos from this trip") : L("Open memory")
     }
 
     var body: some View {
-        Button(action: onTap) {
+        ZStack(alignment: .topTrailing) {
             HStack(spacing: 12) {
                 Text(CityGeocoder.flagEmoji(countryCode: match.countryCode))
                     .font(.system(size: 26))
+                // JEDNA linijka miejsce+kiedy (05.09.2026, user: pokazywało
+                // wcześniej lotnisko wylotu w osobnej linii z mylącym
+                // "London (LGW) → London (LGW)" pod spodem — po naprawie
+                // wyboru docelowego przystanku w `onThisDay(from:)` sam
+                // `cityName` już wystarcza, druga linia była zbędna).
+                // Bez pogody — user: "w przeszłym nie potrzebujemy temperatury".
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(match.cityName) — \(yearsAgoText)")
+                    Text("\(placeText) — \(yearsAgoText)")
                         .font(.system(size: 15, weight: .semibold))
-                    Text(match.tripTitle)
-                        .font(.caption)
                     Text(actionLabel)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Palette.blue)
                 }
                 Spacer()
-                if let weather {
-                    VStack(alignment: .trailing, spacing: 0) {
-                        Text("\(Int(weather.maxC.rounded()))°")
-                            .font(.system(size: 15, weight: .semibold))
-                        Text("\(Int(weather.minC.rounded()))°")
-                            .font(.caption2)
-                    }
-                }
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .padding(.trailing, 16) // miejsce na przycisk X w rogu, żeby się nie nakładały
             }
             .skinAwareHeading()
             .padding(14)
             .background(Palette.heroGradient.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .task {
-            weather = await TravelTimeMachineProvider.historicalWeather(at: match.coordinate, date: match.visitDate)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+                    .background(Circle().fill(.background))
+            }
+            .buttonStyle(.plain)
+            .padding(6)
         }
     }
 }
@@ -1133,6 +1365,33 @@ private struct UpcomingTripCard: View {
     /// do Trip Planning), ten jeden wprost konwertuje na Memory (user:
     /// "Po powrocie ... Create Memory"), więc dostaje osobny handler.
     let onCreateMemory: () -> Void
+    /// Chowa TYLKO kartę-przypomnienie (`.welcomeBack`) — patrz komentarz
+    /// przy przycisku X w `body`/`PlannedTrip.isMemoryPromptDismissed`.
+    let onDismissMemoryPrompt: () -> Void
+    /// Temperatura TERAZ w bieżącym przystanku trwającej podróży (05.09.2026,
+    /// user: "mam Romania 4 of 8, czy może pokazać jaka tam jest temperatura
+    /// teraz") — pobierana tylko w stanie `.inProgress`, `nil` dopóki
+    /// zapytanie się nie skończy albo się nie powiedzie (appka po prostu nie
+    /// pokazuje nic zamiast zgadywać).
+    // `@SwiftUI.State` w pełni kwalifikowane — nazwa koliduje z zagnieżdżonym
+    // `enum State` niżej w tym samym typie (Swift patrzy na lokalny typ
+    // niezależnie od kolejności deklaracji).
+    @SwiftUI.State private var currentTemp: Double? = nil
+    /// Prognoza dla stanów nadchodzących/"dziś"/"jutro" (05.09.2026, user:
+    /// "w nadciągających i teraźniejszych podróżach dobrze mieć
+    /// [temperaturę]") — miejsce docelowe (pierwszy przystanek PO lotnisku
+    /// wylotu, nie samo lotnisko), data startu podróży.
+    @SwiftUI.State private var forecast: TravelTimeMachineProvider.ForecastTemperature? = nil
+
+    init(
+        trip: PlannedTrip, onTap: @escaping () -> Void, onCreateMemory: @escaping () -> Void,
+        onDismissMemoryPrompt: @escaping () -> Void
+    ) {
+        self.trip = trip
+        self.onTap = onTap
+        self.onCreateMemory = onCreateMemory
+        self.onDismissMemoryPrompt = onDismissMemoryPrompt
+    }
 
     /// Pięć stanów (12.08.2026, user po drugim przebiegu feedbacku, z
     /// dokładnym tekstem dla każdego) — sprawdzane w kolejności od
@@ -1145,6 +1404,16 @@ private struct UpcomingTripCard: View {
         case inProgress
         case tomorrow
         case upcoming(days: Int)
+
+        /// Prognoza pokazywana dla wszystkich stanów "jeszcze się nie
+        /// zaczęło" (05.09.2026) — `.inProgress` ma własną, żywą temperaturę
+        /// (`currentTemp`), `.welcomeBack` to już przeszłość.
+        var showsForecast: Bool {
+            switch self {
+            case .startsToday, .tomorrow, .upcoming: return true
+            case .welcomeBack, .inProgress: return false
+            }
+        }
     }
 
     private var state: State {
@@ -1252,7 +1521,7 @@ private struct UpcomingTripCard: View {
     }
 
     var body: some View {
-        Button(action: state == .welcomeBack ? onCreateMemory : onTap) {
+        ZStack(alignment: .topTrailing) {
             HStack(spacing: 12) {
                 Text(icon)
                     .font(.system(size: 26))
@@ -1267,15 +1536,59 @@ private struct UpcomingTripCard: View {
                         .foregroundStyle(Palette.blue)
                 }
                 Spacer()
+                if state == .inProgress, let currentTemp {
+                    Text("\(Int(currentTemp.rounded()))°")
+                        .font(.system(size: 15, weight: .semibold))
+                } else if let forecast, state.showsForecast {
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text("\(Int(forecast.maxC.rounded()))°")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("\(Int(forecast.minC.rounded()))°")
+                            .font(.caption2)
+                    }
+                }
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    // Miejsce na przycisk X w rogu (tylko `.welcomeBack`),
+                    // żeby się nie nakładały — ten sam trick co `OnThisDayCard`.
+                    .padding(.trailing, state == .welcomeBack ? 16 : 0)
             }
             .skinAwareHeading()
             .padding(14)
             .background(Palette.heroGradient.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(Rectangle())
+            .onTapGesture(perform: state == .welcomeBack ? onCreateMemory : onTap)
+
+            // 09.09.2026, user: dostał kartę "Welcome back" dla podróży,
+            // której nie chciał jeszcze zamieniać w film — blokowała pokazanie
+            // kolejnej, nadchodzącej podróży za 9 dni (`HomeView.
+            // featuredPlannedTrip` ma tylko jedno miejsce na Home). X chowa
+            // TYLKO to przypomnienie (`PlannedTrip.isMemoryPromptDismissed`),
+            // sama podróż zostaje w pełni widoczna w Trip Planning.
+            if state == .welcomeBack {
+                Button(action: onDismissMemoryPrompt) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.secondary)
+                        .background(Circle().fill(.background))
+                }
+                .buttonStyle(.plain)
+                .padding(6)
+            }
         }
-        .buttonStyle(.plain)
+        .task(id: trip.currentStop?.persistentModelID) {
+            guard state == .inProgress, let stop = trip.currentStop, let coordinate = stop.coordinate else { return }
+            currentTemp = await TravelTimeMachineProvider.currentTemperature(at: coordinate)
+        }
+        .task(id: trip.id) {
+            // Miejsce DOCELOWE (pierwszy przystanek PO lotnisku wylotu), nie
+            // samo lotnisko — ten sam duch co poprawka w `onThisDay(from:)`.
+            guard state.showsForecast, let start = trip.effectiveStartDate else { return }
+            let sortedStops = (trip.stops ?? []).sorted { $0.order < $1.order }
+            guard let coordinate = (sortedStops.dropFirst().first ?? sortedStops.first)?.coordinate else { return }
+            forecast = await TravelTimeMachineProvider.forecastTemperature(at: coordinate, date: start)
+        }
     }
 }
 

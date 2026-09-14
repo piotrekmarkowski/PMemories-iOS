@@ -38,7 +38,7 @@ enum LeaderboardService {
     /// Zapisuje/aktualizuje wynik AKTUALNEGO usera (upsert po stałym ID) —
     /// wołane po każdym przeliczeniu `ExplorerScore` (patrz `AchievementsView`),
     /// nie na jakimś osobnym timerze — zawsze najświeższy stan.
-    static func submitCurrentScore(score: ExplorerScore, km: Double, countries: Int, cities: Int, elevationM: Double) async throws {
+    static func submitCurrentScore(score: ExplorerScore, km: Double, countries: Int, cities: Int, elevationM: Double, avatarFrame: String) async throws {
         guard let userIdentifier = await AuthManager.shared.userIdentifier,
               let displayName = await AuthManager.shared.displayName else {
             throw ServiceError.notSignedIn
@@ -62,6 +62,16 @@ enum LeaderboardService {
             record = CKRecord(recordType: recordType, recordID: recordID)
         }
         record["displayName"] = displayName as CKRecordValue
+        // Sama RAMKA (kolor/ikona), NIE zdjęcie (30.08.2026, user: "zostawmy
+        // tylko ramkę i inicjały narazie" — po tym jak zapytał o cudze
+        // zdjęcia w rankingu, świadomie odrzucone: appka nie ma dziś
+        // opt-in na pokazywanie zdjęcia profilowego publicznie wszystkim
+        // testerom, to osobna decyzja na później). String zamiast enuma —
+        // CloudKit i tak nie zna `AvatarFrame`; sezonowe ramki `#if DEBUG`
+        // wysłane przez kogoś na buildzie deweloperskim po prostu spadają
+        // do `.none` na czyjejś przeglądarce Release (`AvatarFrame(rawValue:)`
+        // nie rozpozna nieistniejącego case'a), bezpiecznie.
+        record["avatarFrame"] = avatarFrame as CKRecordValue
         record["score"] = score.total as CKRecordValue
         record["km"] = km as CKRecordValue
         record["countries"] = countries as CKRecordValue
@@ -89,6 +99,28 @@ enum LeaderboardService {
         return results.compactMap { _, result in
             guard case .success(let record) = result else { return nil }
             return LeaderboardEntry(record: record)
+        }
+    }
+
+    /// Wpisy TYLKO dla podanych userID (28.08.2026, ranking znajomych —
+    /// `FriendCircleService`) — pobrane wprost po ID rekordu (recordName ==
+    /// identyfikator Sign in with Apple, patrz `submitCurrentScore`), NIE
+    /// przez `CKQuery`. Nie wymaga żadnego dodatkowego indeksu w CloudKit
+    /// Dashboard (w przeciwieństwie do `topEntries`), stąd sortowanie
+    /// lokalne zamiast `NSSortDescriptor`. Członek kręgu, który jeszcze
+    /// nigdy nie przesłał wyniku, po prostu nie ma tu rekordu — pomijany,
+    /// nie traktowany jako błąd.
+    static func entries(forUserIDs userIDs: [String], sortBy: LeaderboardSort) async throws -> [LeaderboardEntry] {
+        guard !userIDs.isEmpty else { return [] }
+        let ids = userIDs.map { CKRecord.ID(recordName: $0) }
+        let results = try await publicDB.records(for: ids)
+        let entries = results.values.compactMap { result -> LeaderboardEntry? in
+            guard case .success(let record) = result else { return nil }
+            return LeaderboardEntry(record: record)
+        }
+        switch sortBy {
+        case .score: return entries.sorted { $0.score > $1.score }
+        case .countries: return entries.sorted { $0.countries > $1.countries }
         }
     }
 }
@@ -120,6 +152,10 @@ struct LeaderboardEntry: Identifiable {
     let countries: Int
     let cities: Int
     let elevationM: Double
+    /// `.none` dla wpisów sprzed tej zmiany (pole jeszcze nie istniało) i
+    /// dla nierozpoznanych/sezonowych wartości — patrz komentarz przy
+    /// `LeaderboardService.submitCurrentScore`.
+    let avatarFrame: AvatarFrame
 
     init?(record: CKRecord) {
         guard let displayName = record["displayName"] as? String,
@@ -131,5 +167,6 @@ struct LeaderboardEntry: Identifiable {
         countries = record["countries"] as? Int ?? 0
         cities = record["cities"] as? Int ?? 0
         elevationM = record["elevationM"] as? Double ?? 0
+        avatarFrame = AvatarFrame(rawValue: record["avatarFrame"] as? String ?? "") ?? .none
     }
 }

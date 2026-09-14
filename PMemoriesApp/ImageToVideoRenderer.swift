@@ -21,28 +21,60 @@ enum ImageToVideoRenderer {
             .appendingPathExtension("mov")
 
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
-        // 29.07.2026 — ProRes zamiast H.264 dla tego POŚREDNIEGO pliku.
-        // Zdjęcie i tak przechodzi przez drugie kodowanie przy finalnym
-        // eksporcie (`AVAssetExportSession`) — dwa kolejne kodowania H.264 z
-        // rzędu kumulowały widoczną utratę jakości ("kopia kopii"), mimo że
-        // ten pierwszy krok miał już jawny, wysoki bitrate (poprzedni fix).
-        // ProRes 422 HQ jest praktycznie bezstratny (plik pośredni i tak
-        // usuwany zaraz po eksporcie, rozmiar bez znaczenia) — realnie liczy
-        // się już tylko JEDNA stratna kompresja: finalny eksport H.264/HEVC.
-        // Bez `AVVideoCompressionPropertiesKey`/bitrate'u — ProRes nie
-        // działa na docelowym bitrate jak H.264, tylko na stałej jakości.
+        // 23.08.2026 — ProRes422HQ (wprowadzone 29.07.2026 dla jakości,
+        // patrz historia w HISTORIA.md) ZDJĘTE po realnym, powtarzalnym
+        // buga zgłoszonym przez testerkę: `AVFoundationErrorDomain -11838`
+        // ("The operation is not supported for this media") z podkodem
+        // `NSOSStatusErrorDomain -16976`, ZAWSZE w fazie `mainExport`
+        // (potwierdzone przez etykietowanie faz z build 19), niezależnie od
+        // filtra/jakości, 100% powtarzalne na JEJ URZĄDZENIU z tymi samymi
+        // zdjęciami. Wsparcie dekodowania ProRes w potoku
+        // `AVAssetExportSession` nie jest jednolite na wszystkich modelach
+        // iPhone'a — appka trafia do userów przez TestFlight na dowolny
+        // sprzęt, nie tylko na urządzenia developera, gdzie to zawsze
+        // działało. HEVC zamiast ProRes: praktycznie zero realnej straty
+        // jakości TU konkretnie, bo ten plik pośredni to i tak JEDNA,
+        // NIERUCHOMA klatka powtórzona przez całą długość klipu (ruch typu
+        // Ken Burns dokłada się PÓŹNIEJ, w `VideoComposer`, przez transformy
+        // na poziomie kompozycji, nie tutaj) — HEVC kompresuje statyczną
+        // treść niemal bezstratnie nawet przy umiarkowanym bitrate, a jest
+        // dekodowalny univerzalnie na każdym urządzeniu z iOS 18+.
+        let pixelCount = Int(size.width * size.height)
         let outputSettings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.proRes422HQ,
+            AVVideoCodecKey: AVVideoCodecType.hevc,
             AVVideoWidthKey: Int(size.width),
-            AVVideoHeightKey: Int(size.height)
+            AVVideoHeightKey: Int(size.height),
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: pixelCount * 8,
+                AVVideoExpectedSourceFrameRateKey: fps,
+                AVVideoMaxKeyFrameIntervalKey: fps
+            ],
+            AVVideoColorPropertiesKey: [
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2
+            ]
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: outputSettings)
         input.expectsMediaDataInRealTime = false
 
+        // 23.08.2026 — w logach urządzenia testerki KAŻDE wywołanie tego
+        // renderera zostawiało "PERFORMANCE WARNING: Appending non-IOSurface
+        // backed CVPixelBuffer" — bufor tworzony zwykłym `CVPixelBufferCreate`
+        // (niżej, `makePixelBuffer`) nie ma wsparcia IOSurface, więc encoder
+        // musi robić powolną kopię po stronie CPU zamiast szybkiej ścieżki
+        // GPU. Prawdziwe wideo z kamery ZAWSZE ma bufory IOSurface — to jest
+        // unikalne dla zdjęć renderowanych na wideo tym mechanizmem, dokładnie
+        // pasujące do tego że bug reprodukuje się WYŁĄCZNIE na projektach z
+        // samych zdjęć. `kCVPixelBufferIOSurfacePropertiesKey` (pusty słownik
+        // wystarcza, żeby wymusić alokację z poparciem IOSurface) w OBU
+        // miejscach (tu i w `makePixelBuffer` niżej, bo to tam faktycznie
+        // powstaje bufor przekazywany do adaptora).
         let pixelBufferAttributes: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
             kCVPixelBufferWidthKey as String: Int(size.width),
-            kCVPixelBufferHeightKey as String: Int(size.height)
+            kCVPixelBufferHeightKey as String: Int(size.height),
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:]
         ]
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(
             assetWriterInput: input,
@@ -98,7 +130,8 @@ enum ImageToVideoRenderer {
         var pixelBuffer: CVPixelBuffer?
         let attrs: [String: Any] = [
             kCVPixelBufferCGImageCompatibilityKey as String: true,
-            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:]
         ]
         let status = CVPixelBufferCreate(
             kCFAllocatorDefault,

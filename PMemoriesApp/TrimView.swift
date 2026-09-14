@@ -189,7 +189,12 @@ struct TrimView: View {
                 transitionButton(label: L("Auto"), isSelected: item.transitionStyle == nil) {
                     item.transitionStyle = nil
                 }
-                ForEach(TransitionStyle.allCases) { style in
+                // Premium style (`.isPremium`) pominięte tu dla zwykłych
+                // userów — ten kompaktowy picker to szybki ręczny override,
+                // zablokowana (kłódka) prezentacja żyje w `StyleView`. Founder
+                // (30.08.2026, `TesterRegistry.hasPremiumUnlocked`) widzi je
+                // też tutaj.
+                ForEach(TransitionStyle.allCases.filter { !$0.isPremium || TesterRegistry.hasPremiumUnlocked(AuthManager.shared.userIdentifier) }) { style in
                     transitionButton(label: style.label, isSelected: item.transitionStyle == style) {
                         item.transitionStyle = style
                     }
@@ -275,6 +280,23 @@ private struct TrimRangeSlider: View {
                 let endFraction = (trimStart + selectedDuration) / sourceDuration
                 let startX = CGFloat(startFraction) * width
                 let endX = CGFloat(endFraction) * width
+                // 30.08.2026 — realny bug: uchwyt to `Capsule` szerokości
+                // `handleWidth` WYŚRODKOWANA na `startX`/`endX` (`.position(x:)`
+                // ustawia ŚRODEK, nie krawędź). Dla nietkniętego klipu
+                // `trimStart == 0` → `startX == 0` → połowa uchwytu (9pt)
+                // renderuje się poza lewą krawędzią paska, niewidoczna i
+                // nie do złapania — user: "dlaczego poczatku filmiku nie
+                // moge przesunac". Ten sam problem symetrycznie po prawej,
+                // gdy `endX` blisko `width` (klip nieprzycięty na końcu).
+                // Naprawione: SAMA WIDOCZNA/ŁAPALNA pozycja uchwytu wcięta o
+                // pół jego szerokości od krawędzi paska — logika przeciągania
+                // (`value.location.x` względem `width` paska, NIE względem
+                // pozycji spoczynkowej uchwytu) zostaje bez zmian, więc
+                // przesunięcie do samego zera dalej działa poprawnie, tylko
+                // uchwyt startowy zawsze zostaje w pełni widoczny i chwytny.
+                let handleHalfWidth = handleWidth / 2
+                let displayStartX = min(max(startX, handleHalfWidth), width - handleHalfWidth)
+                let displayEndX = min(max(endX, handleHalfWidth), width - handleHalfWidth)
 
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -286,7 +308,7 @@ private struct TrimRangeSlider: View {
                         .offset(x: startX)
 
                     handle
-                        .position(x: startX, y: trackHeight / 2)
+                        .position(x: displayStartX, y: trackHeight / 2)
                         .gesture(DragGesture().onChanged { value in
                             stopPlayback()
                             let minGapX = CGFloat(minSelectionSeconds / sourceDuration) * width
@@ -300,7 +322,7 @@ private struct TrimRangeSlider: View {
                         })
 
                     handle
-                        .position(x: endX, y: trackHeight / 2)
+                        .position(x: displayEndX, y: trackHeight / 2)
                         .gesture(DragGesture().onChanged { value in
                             stopPlayback()
                             let minGapX = CGFloat(minSelectionSeconds / sourceDuration) * width

@@ -54,6 +54,13 @@ struct TripStop: Identifiable {
     var coordinate: CLLocationCoordinate2D?
     var country: String?
     var countryCode: String?
+    /// Region administracyjny pierwszego poziomu (04.09.2026) — potrzebny
+    /// WYŁĄCZNIE dla Wielkiej Brytanii: Apple nie ma osobnych kodów ISO dla
+    /// Anglii/Szkocji/Walii/Irlandii Płn. (wszystko to "GB"), ale user chce
+    /// osobne pieczątki paszportowe dla każdej z tych 4 — patrz
+    /// `TravelAchievementsCalculator.passportCountries` gdzie to się
+    /// faktycznie wykorzystuje. Dla reszty świata pole nieużywane.
+    var administrativeArea: String?
     /// Kiedy user faktycznie był w tym miejscu — opcjonalne (nie chcemy
     /// wymuszać dodatkowego kroku w szybkim wpisywaniu trasy). Potrzebne na
     /// przyszłość dla "X dni", Travel Time Machine, Travel Wrapped.
@@ -88,6 +95,7 @@ enum CityGeocoder {
         resolved.coordinate = location.coordinate
         resolved.country = placemark.country
         resolved.countryCode = placemark.isoCountryCode
+        resolved.administrativeArea = placemark.administrativeArea
         return resolved
     }
 
@@ -99,7 +107,7 @@ enum CityGeocoder {
         guard let placemark = try? await geocoder.reverseGeocodeLocation(location).first else {
             return nil
         }
-        return placemark.locality ?? placemark.administrativeArea ?? placemark.country
+        return placeName(from: placemark)
     }
 
     /// Jak `reverseResolve`, ale zachowuje też kraj/kod kraju (potrzebne dla
@@ -108,10 +116,29 @@ enum CityGeocoder {
     static func reverseResolveFull(_ location: CLLocation) async -> (city: String, country: String?, countryCode: String?)? {
         let geocoder = CLGeocoder()
         guard let placemark = try? await geocoder.reverseGeocodeLocation(location).first,
-              let city = placemark.locality ?? placemark.administrativeArea ?? placemark.country else {
+              let city = placeName(from: placemark) else {
             return nil
         }
         return (city, placemark.country, placemark.isoCountryCode)
+    }
+
+    /// 12.09.2026, zgłoszony bug (user: zdjęcie z plaży Elafonisi na Krecie
+    /// dostało podpis "Grecja, Greece" zamiast nazwy plaży) — przyczyna:
+    /// odległe, niezaludnione miejsca (plaże, szczyty) często nie mają
+    /// `locality`/`administrativeArea` w odpowiedzi Apple'owego geokodera,
+    /// więc łańcuch spadał od razu do samej nazwy kraju. Dodane pośrednie
+    /// szczeble ŁAŃCUCHA PRZED krajem: `subLocality` (dzielnica/okolica),
+    /// `areasOfInterest` (nazwane punkty zainteresowania — DOKŁADNIE tu
+    /// Apple trzyma nazwy typu "Elafonissi Beach" dla znanych miejsc bez
+    /// własnej miejscowości), `name` (surowy adres/POI jako ostatnia deska
+    /// przed regionem/krajem).
+    private static func placeName(from placemark: CLPlacemark) -> String? {
+        placemark.locality
+            ?? placemark.subLocality
+            ?? placemark.areasOfInterest?.first
+            ?? placemark.name
+            ?? placemark.administrativeArea
+            ?? placemark.country
     }
 
     /// Skraca nazwę lotniska — user 30.07.2026: "London (STN) → Lanzarote

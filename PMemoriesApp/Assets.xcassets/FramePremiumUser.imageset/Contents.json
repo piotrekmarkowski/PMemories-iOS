@@ -1,0 +1,6 @@
+{
+  "images" : [
+    { "idiom" : "universal", "filename" : "frame_premium_user.png", "scale" : "1x" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}

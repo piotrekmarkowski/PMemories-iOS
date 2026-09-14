@@ -38,18 +38,66 @@ enum PeakDetector {
         guard let match = try await nearestPeak(near: location.coordinate) else {
             throw PeakDetectorError.noPeakNearby
         }
-        // Współrzędna SZCZYTU (węzeł OSM), nie surowa (mniej dokładna) pozycja
-        // GPS usera — precyzyjniejsze i od razu w pełni rozwiązuje przystanek
-        // (`TripStop.coordinate` ustawione), bez pośredniego kroku wyboru
-        // podpowiedzi z `CitySearchCompleter`, który mógłby nie odnaleźć
-        // odległej/rzadko wyszukiwanej nazwy szczytu.
+        let (country, countryCode) = await resolveCountry(for: match.coordinate)
+        return DetectedPeak(name: match.name, coordinate: match.coordinate, country: country, countryCode: countryCode)
+    }
+
+    /// Wyszukiwanie szczytu PO NAZWIE, bez wymogu stania na nim z włączonym
+    /// GPS-em (09.09.2026, user: "nie mozna wybrac na liscie szczytow jesli
+    /// sie chodzi po gorach... dzien pozniej sie chce stworzyc mape albo po
+    /// wyprawie nie mozna wybrac gdzie sie bylo" — `detectNearbyPeak` działa
+    /// TYLKO w momencie stania na szczycie, więc dobudowanie trasy później
+    /// albo z domu było niemożliwe).
+    ///
+    /// UWAGA: pierwsza wersja próbowała tego samego zapytania Overpass co
+    /// `nearestPeak` (`node["natural"="peak"]["name"~...]`), tylko bez
+    /// promienia `around:` — user zgłosił "szczyty się nie wyszukują".
+    /// Przyczyna sprawdzona bezpośrednio (`curl` do publicznego Overpass):
+    /// `"remark": "runtime error: Query timed out"` — wyszukiwanie PO
+    /// NAZWIE bez ograniczenia geograficznego to skan CAŁEJ planety (Overpass
+    /// ma indeks przestrzenny, nie tekstowy), publiczny serwer zawsze się na
+    /// tym wykłada. Zamiast tego Nominatim (ten sam ekosystem OSM, ale
+    /// zaprojektowany do wyszukiwania PO NAZWIE — ma własny indeks
+    /// tekstowy) — filtrowane do `class=natural`/`type=peak`, żeby nie
+    /// mieszać z miastami/restauracjami o tej samej nazwie. Kraj/kod kraju
+    /// od razu w odpowiedzi (`address`), bez osobnego reverse-geocode.
+    static func searchPeaks(named query: String) async throws -> [DetectedPeak] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { return [] }
+        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return [] }
+        let url = URL(string: "https://nominatim.openstreetmap.org/search?q=\(encoded)&format=json&limit=15&addressdetails=1")!
+
+        var request = URLRequest(url: url)
+        // Nominatim usage policy wymaga rozpoznawalnego User-Agent —
+        // anonimowe/domyślne żądania bywają odrzucane/throttlowane.
+        request.setValue("PMemories iOS App", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 15
+
+        let (data, _) = try await URLSession.shared.data(for: request)
+        let results = try JSONDecoder().decode([NominatimResult].self, from: data)
+
+        return results
+            .filter { $0.category == "natural" && $0.type == "peak" }
+            .compactMap { result -> DetectedPeak? in
+                guard let name = result.name ?? result.address?.peak,
+                      let lat = Double(result.lat), let lon = Double(result.lon) else { return nil }
+                return DetectedPeak(
+                    name: name, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
+                    country: result.address?.country, countryCode: result.address?.countryCode?.uppercased()
+                )
+            }
+    }
+
+    /// Współrzędna SZCZYTU (węzeł OSM), nie surowa (mniej dokładna) pozycja
+    /// GPS usera — precyzyjniejsze i od razu w pełni rozwiązuje przystanek
+    /// (`TripStop.coordinate` ustawione), bez pośredniego kroku wyboru
+    /// podpowiedzi z `CitySearchCompleter`, który mógłby nie odnaleźć
+    /// odległej/rzadko wyszukiwanej nazwy szczytu.
+    private static func resolveCountry(for coordinate: CLLocationCoordinate2D) async -> (country: String?, countryCode: String?) {
         let placemark = try? await CLGeocoder().reverseGeocodeLocation(
-            CLLocation(latitude: match.coordinate.latitude, longitude: match.coordinate.longitude)
+            CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         ).first
-        return DetectedPeak(
-            name: match.name, coordinate: match.coordinate,
-            country: placemark?.country, countryCode: placemark?.isoCountryCode
-        )
+        return (placemark?.country, placemark?.isoCountryCode)
     }
 
     private static func nearestPeak(near coordinate: CLLocationCoordinate2D) async throws -> (name: String, coordinate: CLLocationCoordinate2D)? {
@@ -92,13 +140,41 @@ private struct OverpassPeakTags: Decodable {
     let name: String?
 }
 
+private struct NominatimResult: Decodable {
+    let name: String?
+    let lat: String
+    let lon: String
+    let category: String
+    let type: String
+    let address: NominatimAddress?
+
+    enum CodingKeys: String, CodingKey {
+        case name, lat, lon, type, address
+        case category = "class"
+    }
+}
+
+private struct NominatimAddress: Decodable {
+    let peak: String?
+    let country: String?
+    let countryCode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case peak, country
+        case countryCode = "country_code"
+    }
+}
+
 /// Most między delegate-owym `CLLocationManager` a `async`/`await` — JEDNO,
 /// jednorazowe żądanie lokalizacji (`requestLocation()`), nie ciągłe
-/// śledzenie. Świadomie jedyne miejsce w appce sięgające po GPS — reszta
-/// Travel Map (trasowanie, geokodowanie miast) celowo działa bez lokalizacji
-/// usera, żeby nie zużywać baterii.
+/// śledzenie. Reszta Travel Map (trasowanie, geokodowanie miast) celowo
+/// działa bez lokalizacji usera, żeby nie zużywać baterii — to i
+/// `TravelJourneyPosterView` (13.09.2026, wschód/zachód słońca pod
+/// dzień/noc mapy plakatu) to jedyne dwa świadome, JEDNORAZOWE użycia GPS-a
+/// w całej appce. Stąd `internal` zamiast `private` — współdzielone, nie
+/// duplikowane.
 @MainActor
-private final class CurrentLocationProvider: NSObject, CLLocationManagerDelegate {
+final class CurrentLocationProvider: NSObject, CLLocationManagerDelegate {
     enum LocationError: LocalizedError {
         case permissionDenied
         case failed(Error)

@@ -43,6 +43,7 @@ struct OnboardingView: View {
     @State private var authErrorMessage: String?
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \SavedTrip.createdAt) private var savedTrips: [SavedTrip]
+    @Query private var savedProjects: [SavedProject]
 
     private var pages: [OnboardingPage] {
         [
@@ -220,11 +221,12 @@ struct OnboardingView: View {
     /// pierwszej wizycie w Ranking.
     private func submitScoreIfSignedIn() {
         guard auth.isSignedIn else { return }
-        let score = TravelAchievementsCalculator.explorerScore(from: savedTrips)
+        let score = TravelAchievementsCalculator.explorerScore(from: savedTrips, projects: savedProjects)
         Task {
+            let avatarFrame = UserDefaults.standard.string(forKey: "selectedAvatarFrame") ?? AvatarFrame.none.rawValue
             try? await LeaderboardService.submitCurrentScore(
                 score: score, km: score.totalKm, countries: score.rawCountries,
-                cities: score.rawCities, elevationM: score.rawElevationM
+                cities: score.rawCities, elevationM: score.rawElevationM, avatarFrame: avatarFrame
             )
         }
     }

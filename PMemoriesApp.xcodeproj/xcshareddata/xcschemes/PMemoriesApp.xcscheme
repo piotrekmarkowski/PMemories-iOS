@@ -21,6 +21,20 @@
                ReferencedContainer = "container:PMemoriesApp.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "C291AEAE2BF798BC87972F3B"
+               BuildableName = "PMemoriesAppTests.xctest"
+               BlueprintName = "PMemoriesAppTests"
+               ReferencedContainer = "container:PMemoriesApp.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -39,6 +53,17 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "C291AEAE2BF798BC87972F3B"
+               BuildableName = "PMemoriesAppTests.xctest"
+               BlueprintName = "PMemoriesAppTests"
+               ReferencedContainer = "container:PMemoriesApp.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

@@ -200,6 +200,73 @@ extension PlannedTrip {
     }
 }
 
+extension PlannedTrip {
+    /// "Podziel się jako szablon" (26.08.2026, user po zobaczeniu pierwszej
+    /// wersji na `SavedTrip`: "to nie to, o to mi chodziło" wskazując na
+    /// EKRAN Planned Trips) — inspiracja dla kogoś, kto NIE leci z nami
+    /// (w odróżnieniu od `transferDTO` wyżej, żywe współplanowanie TEJ
+    /// SAMEJ podróży z towarzyszem lotu). Reużywa ten sam `TripTransferDTO`/
+    /// plik `.pmtrip`/import w `HomeView.importTrip`. `placesToVisit`
+    /// ZOSTAJE (atrakcje są częścią "trasy", nie daty), ale `statusRawValue`/
+    /// `dayIndex` resetowane — odbiorca jeszcze nie ma dni ustalonych.
+    var templateTransferDTO: TripTransferDTO {
+        TripTransferDTO(
+            title: title, tripDescription: "", startDate: nil, endDate: nil,
+            stops: (stops ?? []).sorted(by: { $0.order < $1.order }).map { stop in
+                StopTransferDTO(
+                    cityName: stop.cityName, country: stop.country, countryCode: stop.countryCode,
+                    latitude: stop.latitude, longitude: stop.longitude,
+                    transportRawValue: stop.transportRawValue, order: stop.order,
+                    checkInDate: nil, checkOutDate: nil,
+                    transportDepartureTime: nil, transportArrivalTime: nil,
+                    transportCostAmount: nil,
+                    accommodationRawValue: nil, accommodationName: nil, accommodationAddress: nil,
+                    accommodationCostAmount: nil,
+                    notes: "",
+                    placesToVisit: (stop.placesToVisit ?? []).sorted(by: { $0.order < $1.order }).map {
+                        PlaceTransferDTO(name: $0.name, statusRawValue: PlaceVisitStatus.wantToVisit.rawValue, order: $0.order, dayIndex: nil)
+                    }
+                )
+            },
+            currencyCode: Locale.current.currency?.identifier ?? "USD",
+            flightCostAmount: nil, estimatedCostAmount: nil, isWholePackage: false
+        )
+    }
+}
+
+extension SavedTrip {
+    /// "Podziel się jako szablon" (26.08.2026, user: stara/odbyta podróż
+    /// jako inspiracja dla kogoś innego — INNY przypadek niż
+    /// `PlannedTrip.transferDTO` wyżej, tam obie strony faktycznie razem
+    /// planują TĘ SAMĄ podróż). Reużywa DOKŁADNIE ten sam `TripTransferDTO`/
+    /// plik `.pmtrip`/import w `HomeView.importTrip` — odbiorca i tak zawsze
+    /// ląduje z NOWĄ, niezależną `PlannedTrip` z tej samej ścieżki kodu,
+    /// zero nowego typu pliku. Świadomie BEZ dat/kosztów/noclegu (user:
+    /// "date itp każdy sobie ustala na nowo, zostają miejsca") — `SavedStop`
+    /// i tak nie ma pól noclegu/kosztu, ale `arrivalDate` trzeba jawnie
+    /// pominąć, żeby odbiorca nie dostał dat NASZEJ wycieczki jako swoich.
+    var templateTransferDTO: TripTransferDTO {
+        TripTransferDTO(
+            title: title, tripDescription: "", startDate: nil, endDate: nil,
+            stops: stops.sorted(by: { $0.order < $1.order }).map { stop in
+                StopTransferDTO(
+                    cityName: stop.cityName, country: stop.country, countryCode: stop.countryCode,
+                    latitude: stop.latitude, longitude: stop.longitude,
+                    transportRawValue: stop.transportRawValue, order: stop.order,
+                    checkInDate: nil, checkOutDate: nil,
+                    transportDepartureTime: nil, transportArrivalTime: nil,
+                    transportCostAmount: nil,
+                    accommodationRawValue: nil, accommodationName: nil, accommodationAddress: nil,
+                    accommodationCostAmount: nil,
+                    notes: "", placesToVisit: []
+                )
+            },
+            currencyCode: Locale.current.currency?.identifier ?? "USD",
+            flightCostAmount: nil, estimatedCostAmount: nil, isWholePackage: false
+        )
+    }
+}
+
 extension TripTransferDTO {
     /// Współdzielona budowa `[PlannedStop]` z DTO — użyta zarówno przy
     /// pierwszym imporcie (`makePlannedTrip`) jak i przy nadpisywaniu
@@ -262,13 +329,39 @@ extension PlannedTrip {
         estimatedCostAmount = dto.estimatedCostAmount
         isWholePackage = dto.isWholePackage
 
+        // Status "odwiedzone"/"chcę odwiedzić" per miejsce ZAPAMIĘTANY przed
+        // skasowaniem starych przystanków (05.09.2026, user: "jeśli naznaczę
+        // coś co odwiedziłem... nic nie zostaje zapisane") — DTO ze
+        // współdzielonego serwera to zawsze pierwotny SZABLON, nigdy nie ma w
+        // sobie lokalnego postępu drugiej osoby, więc "ostatni zapis wygrywa"
+        // bez tego kroku po cichu resetował wszystkie odhaczone checkboxy przy
+        // każdym odświeżeniu. Klucz: miasto+nazwa miejsca+dzień (case-
+        // insensitive) — wystarczająco unikalne w obrębie jednej podróży.
+        var statusByKey: [String: String] = [:]
+        for stop in stops ?? [] {
+            for place in stop.placesToVisit ?? [] {
+                let key = Self.placeStatusKey(city: stop.cityName, placeName: place.name, dayIndex: place.dayIndex)
+                statusByKey[key] = place.statusRawValue
+            }
+        }
+
         for stop in stops ?? [] {
             modelContext.delete(stop)
         }
         let newStops = dto.makePlannedStops()
         for stop in newStops {
+            for place in stop.placesToVisit ?? [] {
+                let key = Self.placeStatusKey(city: stop.cityName, placeName: place.name, dayIndex: place.dayIndex)
+                if let preservedStatus = statusByKey[key] {
+                    place.statusRawValue = preservedStatus
+                }
+            }
             modelContext.insert(stop)
         }
         stops = newStops
+    }
+
+    private static func placeStatusKey(city: String, placeName: String, dayIndex: Int?) -> String {
+        "\(city.trimmingCharacters(in: .whitespaces).lowercased())|||\(placeName.trimmingCharacters(in: .whitespaces).lowercased())|||\(dayIndex.map(String.init) ?? "any")"
     }
 }
