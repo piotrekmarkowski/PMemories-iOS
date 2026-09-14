@@ -18,12 +18,20 @@ final class SavedTrip {
     var createdAt: Date = Date()
     @Relationship(deleteRule: .cascade, inverse: \SavedStop.trip)
     var stops: [SavedStop] = []
+    /// 12.09.2026, feedback narzeczonej usera (przez usera): hierarchia
+    /// wyboru pieczątek na plakacie "My Travel Journey" ma punkt 5 —
+    /// "Ulubione, jeśli user je oznaczył" (`TravelRarityScore`). Appka nie
+    /// miała wcześniej żadnej flagi "ulubiona podróż" — user potwierdził
+    /// wprost że warto ją dodać. Oznaczane w `TripsListView` (serduszko
+    /// w wierszu/`contextMenu`/`swipeActions`).
+    var isFavorite: Bool = false
 
-    init(id: UUID = UUID(), title: String, createdAt: Date = Date(), stops: [SavedStop] = []) {
+    init(id: UUID = UUID(), title: String, createdAt: Date = Date(), stops: [SavedStop] = [], isFavorite: Bool = false) {
         self.id = id
         self.title = title
         self.createdAt = createdAt
         self.stops = stops
+        self.isFavorite = isFavorite
     }
 }
 
@@ -56,6 +64,13 @@ final class SavedStop {
     /// `SavedProject.id` ręcznie połączonego filmu — patrz
     /// `TripStop.linkedProjectID` po pełne uzasadnienie.
     var linkedProjectID: UUID?
+    /// Patrz `TripStop.administrativeArea` — używane tylko dla rozdzielenia
+    /// pieczątek Wielkiej Brytanii w Travel Passport.
+    var administrativeArea: String?
+    /// Wyciszenie karty "On This Day" dla TEGO przystanku (05.09.2026) —
+    /// user chce móc schować pojedyncze wspomnienie (np. z zakończonego
+    /// związku) bez usuwania samej podróży z historii/statystyk.
+    var isHiddenFromOnThisDay: Bool = false
     var trip: SavedTrip?
 
     init(
@@ -63,7 +78,8 @@ final class SavedStop {
         latitude: Double, longitude: Double, transportRawValue: String, order: Int,
         arrivalDate: Date? = nil, legDistanceKm: Double = 0,
         elevationGainMeters: Double? = nil, highestElevationMeters: Double? = nil,
-        representativePhotoIdentifier: String? = nil, linkedProjectID: UUID? = nil
+        representativePhotoIdentifier: String? = nil, linkedProjectID: UUID? = nil,
+        administrativeArea: String? = nil
     ) {
         self.cityName = cityName
         self.country = country
@@ -78,6 +94,7 @@ final class SavedStop {
         self.highestElevationMeters = highestElevationMeters
         self.representativePhotoIdentifier = representativePhotoIdentifier
         self.linkedProjectID = linkedProjectID
+        self.administrativeArea = administrativeArea
     }
 
     var coordinate: CLLocationCoordinate2D {
@@ -99,6 +116,7 @@ extension SavedTrip {
             stop.arrivalDate = saved.arrivalDate
             stop.representativePhotoIdentifier = saved.representativePhotoIdentifier
             stop.linkedProjectID = saved.linkedProjectID
+            stop.administrativeArea = saved.administrativeArea
             return stop
         }
     }
@@ -136,6 +154,17 @@ extension SavedTrip {
         stops.compactMap(\.highestElevationMeters).max()
     }
 
+    /// Data SAMEJ podróży (26.08.2026, sortowanie "historii" w
+    /// `TripsListView` od najbliższej do najdalszej) — najwcześniejszy
+    /// `arrivalDate` spośród przystanków, nie `createdAt` (kiedy podróż
+    /// trafiła do appki). Dzięki temu stara wycieczka dopisana teraz trafia
+    /// we właściwe miejsce chronologiczne zamiast na sam szczyt listy.
+    /// Fallback na `createdAt` gdy user nie wypełnił żadnej daty przyjazdu
+    /// (opcjonalne pole na `SavedStop`) — nie zgadujemy.
+    var effectiveDate: Date {
+        stops.compactMap(\.arrivalDate).min() ?? createdAt
+    }
+
     /// Liczba dni podróży (od pierwszego do ostatniego `arrivalDate`,
     /// włącznie) — `nil` gdy którykolwiek z tych dwóch dat brakuje (user nie
     /// wypełnił daty, opcjonalne pole), żeby nie zgadywać/zmyślać liczby.
@@ -152,7 +181,11 @@ extension SavedTrip {
     /// z `TravelMapView` (03.08.2026) przy przenosinach listy "Your Trips" do
     /// Badges — ten sam formatowany tekst potrzebny w obu miejscach.
     var subtitle: String {
-        var parts = [createdAt.formatted(date: .abbreviated, time: .omitted)]
+        // `effectiveDate` (26.08.2026), NIE `createdAt` — bug znaleziony przez
+        // usera: lista sortowana wg daty podróży, ale wciąż POKAZYWAŁA
+        // `createdAt` (kiedy zapisano w appce), więc widoczna kolejność dat
+        // wyglądała losowo mimo poprawnego sortowania pod spodem.
+        var parts = [effectiveDate.formatted(date: .abbreviated, time: .omitted)]
         if totalDistanceKm > 0 {
             parts.append("\(Int(totalDistanceKm.rounded()).formatted()) km")
         }

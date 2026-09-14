@@ -44,6 +44,23 @@ private struct TabSkinBackground: ViewModifier {
                         .animation(.easeInOut(duration: 0.4), value: selectedSkinRawValue)
                 }
                 .ignoresSafeArea()
+            } else {
+                // Stan domyślny/brak skórki (22.08.2026, user: "bez skorki
+                // jest strasznie jednolite [tło], nie widac chmurek") — był
+                // kompletnie pusty `if let` bez gałęzi `else`, więc ekran
+                // spadał na czysto biały systemowy background. Świadomie
+                // BEZ ciemnej nakładki 0.18 jak realne skórki wyżej — ten
+                // obrazek jest już z założenia jasny/pastelowy (żeby nie
+                // konkurować z prawdziwymi zdjęciowymi skórkami), dociemnienie
+                // zrobiłoby z niego szarą mgłę zamiast czystego nieba.
+                GeometryReader { proxy in
+                    Image("DefaultClouds")
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+                }
+                .ignoresSafeArea()
             }
         }
     }
@@ -81,7 +98,15 @@ private struct SkinAwareHeading: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .foregroundStyle(hasActiveSkin ? .white : .primary)
+            // 23.08.2026 — realny bug report (zrzut z telefonu w trybie
+            // ciemnym): `.primary` w Dark Mode robi się biały, ale
+            // "DefaultClouds" (brak aktywnej skórki) jest ZAWSZE jasne/
+            // pastelowe, niezależnie od trybu systemowego — biały tekst na
+            // jasnym niebie był nieczytelny. To tło nigdy nie ciemnieje, więc
+            // tekst nad nim też nie powinien podążać za systemowym trybem —
+            // stały ciemny kolor zamiast `.primary` W TYM jednym przypadku
+            // (aktywne skórki zdjęciowe dalej używają `.white`, bez zmian).
+            .foregroundStyle(AppSkin.skinAwareTextColor())
             .shadow(color: .black.opacity(hasActiveSkin ? 0.35 : 0), radius: 4, y: 1)
     }
 }

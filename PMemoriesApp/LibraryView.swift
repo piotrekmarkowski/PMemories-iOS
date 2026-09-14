@@ -262,7 +262,7 @@ struct LibraryView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(isSelected ? Palette.heroGradient : LinearGradient(colors: [Color.secondary.opacity(0.15)], startPoint: .top, endPoint: .bottom), in: Capsule())
-            .foregroundStyle(isSelected ? .white : (AppSkin.isAnySkinActive ? .white : .primary))
+            .foregroundStyle(isSelected ? .white : AppSkin.skinAwareTextColor())
         }
         .buttonStyle(.plain)
     }
@@ -282,9 +282,9 @@ struct LibraryView: View {
                     // 30.07.2026: nawiązanie do "PM" z nazwy PMemories, tylko
                     // pierwsze litery, reszta tekstu neutralna.
                     (Text("P").foregroundStyle(Palette.blue)
-                     + Text("lay ").foregroundStyle(AppSkin.isAnySkinActive ? .white : .primary)
+                     + Text("lay ").foregroundStyle(AppSkin.skinAwareTextColor())
                      + Text("M").foregroundStyle(Palette.purple)
-                     + Text("emories").foregroundStyle(AppSkin.isAnySkinActive ? .white : .primary))
+                     + Text("emories").foregroundStyle(AppSkin.skinAwareTextColor()))
                         .font(.system(size: 20, weight: .semibold, design: .rounded))
                         .shadow(color: .black.opacity(AppSkin.isAnySkinActive ? 0.35 : 0), radius: 4, y: 1)
                         .listRowSeparator(.hidden)
@@ -303,7 +303,7 @@ struct LibraryView: View {
                             yearSectionRows(group.projects)
                         } header: {
                             Text(String(group.year))
-                                .foregroundStyle(AppSkin.isAnySkinActive ? .white : .secondary)
+                                .foregroundStyle(AppSkin.skinAwareTextColor())
                         }
                     }
                 }

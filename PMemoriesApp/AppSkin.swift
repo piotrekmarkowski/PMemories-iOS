@@ -101,6 +101,20 @@ enum AppSkin: String, CaseIterable, Identifiable, Codable {
         let rawValue = UserDefaults.standard.string(forKey: "selectedAppSkin") ?? AppSkin.none.rawValue
         return AppSkin(rawValue: rawValue)?.currentAssetName != nil
     }
+
+    /// Kolor tekstu leżącego BEZPOŚREDNIO na tle zakładki (nie na karcie) —
+    /// te same zasady co `skinAwareHeading()` w `TabSkinBackground.swift`:
+    /// biały gdy jest aktywna zdjęciowa skórka, ale STAŁY ciemny kolor (NIE
+    /// `.primary`/`.secondary`) gdy skórki nie ma — bo bez skórki tłem jest
+    /// zawsze jasne "DefaultClouds", a `.primary`/`.secondary` w Dark Mode
+    /// robią się jasne i znikają na tym zawsze-jasnym tle. Znaleziono
+    /// 28.08.2026 kilka miejsc (Library/Home/Travel Map) które ustawiały
+    /// kolor ręcznie zamiast przez `skinAwareHeading()` i nie miały tej
+    /// poprawki — stąd wspólny helper zamiast kopiowania logiki po raz
+    /// kolejny.
+    static func skinAwareTextColor(opacity: Double = 1) -> Color {
+        isAnySkinActive ? Color.white.opacity(opacity) : Color(white: 0.15)
+    }
 }
 
 /// Pora roku do skórki `.seasonal` — liczona z kalendarza TELEFONU

@@ -992,6 +992,7 @@ enum TravelMapVideoRenderer {
             ctx.cgContext.restoreGState()
 
             drawDistanceBadge(distanceKm, in: ctx.cgContext, canvasSize: size, scale: scale)
+            drawWatermark(in: ctx.cgContext, canvasSize: size, scale: scale)
 
             ctx.cgContext.saveGState()
             ctx.cgContext.translateBy(x: worldOffset.x, y: worldOffset.y)
@@ -1097,6 +1098,30 @@ enum TravelMapVideoRenderer {
     /// karty, niewidoczne przy starym, dalekim zoomie, ale rażące przy
     /// nowym, bliższym — user: "kropka nie jest w miejscu gdzie zatrzymuje
     /// się dany środek transportu"). `dimmed` = cel jeszcze nieosiągnięty.
+    /// 26.08.2026 — Free/Premium branding (`Pricing.md`): znak wodny na
+    /// segmencie animowanej mapy, na razie widoczny dla WSZYSTKICH
+    /// (świadoma, tymczasowa decyzja fazy wzrostu — "trzeba to reklamować,
+    /// usunie się jak będzie więcej userów", nie stałe rozróżnienie
+    /// Free/Premium na starcie). Prawdziwy watermark (delikatny, z cieniem
+    /// zamiast twardej plakietki jak `drawDistanceBadge`) — ma wtapiać się
+    /// w mapę, nie wyglądać jak element interfejsu. Lewy dolny róg — prawy
+    /// górny zajęty przez odznakę dystansu.
+    private static func drawWatermark(in context: CGContext, canvasSize: CGSize, scale: CGFloat) {
+        let text = "PMemories"
+        let font = UIFont.systemFont(ofSize: 22 * scale, weight: .semibold)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: UIColor.white.withAlphaComponent(0.85)
+        ]
+        let textSize = (text as NSString).size(withAttributes: attrs)
+        let origin = CGPoint(x: 24 * scale, y: canvasSize.height - textSize.height - 40 * scale)
+
+        context.saveGState()
+        context.setShadow(offset: CGSize(width: 0, height: 1 * scale), blur: 4 * scale, color: UIColor.black.withAlphaComponent(0.5).cgColor)
+        (text as NSString).draw(at: origin, withAttributes: attrs)
+        context.restoreGState()
+    }
+
     private static func drawGlobeCityLabel(_ stop: TripStop, at point: CGPoint, in context: CGContext, dimmed: Bool, scale: CGFloat, thumbnail: UIImage? = nil) {
         let alpha: CGFloat = dimmed ? 0.6 : 1.0
         let flag = CityGeocoder.flagEmoji(countryCode: stop.countryCode)

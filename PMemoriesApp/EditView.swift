@@ -4,6 +4,7 @@ import MediaPlayer
 import SwiftData
 import UIKit
 import AVFoundation
+import os
 
 /// Ekran edycji — podgląd, timeline (reorder + toggle ruchu Live Photo) i
 /// dolny toolbar narzędzi, wzorowane na phone mockupie z moodboardu.
@@ -20,6 +21,12 @@ struct EditView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    /// Dopasowanie do przystanku zaplanowanej podróży (30.08.2026) — patrz
+    /// `TripMemoryMatcher`. Wszystkie zapisane podróże (nie tylko aktualnie
+    /// oglądana) — dopasowanie po lokalizacji zdjęć, nie po tym, którą
+    /// podróż user akurat przegląda.
+    @Query(sort: \SavedTrip.createdAt) private var savedTrips: [SavedTrip]
+    @State private var tripMemorySuggestion: TripMemoryMatcher.Suggestion?
 
     @State private var selectedIndex = 0
     @State private var selectedSong: MPMediaItem?
@@ -46,10 +53,17 @@ struct EditView: View {
     /// user: "użytkownik sobie wybiera jakie przejścia chce i ile, program
     /// automatycznie sam je rozmieszcza") — patrz `StyleView`,
     /// `SavedProject.enabledTransitionStylesRaw`.
-    @State private var enabledTransitions: Set<TransitionStyle> = Set(TransitionStyle.allCases)
+    /// Premium style (`.isPremium`) w domyślnej puli TYLKO dla Foundera
+    /// (30.08.2026, `TesterRegistry.hasPremiumUnlocked`) — appka nie ma
+    /// jeszcze systemu płatności dla reszty userów, patrz `StyleView`.
+    @State private var enabledTransitions: Set<TransitionStyle> = Set(
+        TransitionStyle.allCases.filter { !$0.isPremium || TesterRegistry.hasPremiumUnlocked(AuthManager.shared.userIdentifier) }
+    )
     @State private var isShowingStyle = false
     /// Filtr kolorystyczny (09.08.2026) — patrz `StyleView`/`ColorGrader`.
     @State private var colorStyle: ColorStyle = .none
+    /// "AI Director" (30.08.2026) — patrz `AIDirectorView`/`AIDirectorEngine`.
+    @State private var isShowingAIDirector = false
     @State private var isShowingTrim = false
     @State private var isShowingPhotoDuration = false
     @State private var isShowingTotalDuration = false
@@ -186,6 +200,30 @@ struct EditView: View {
         .alert("Saved to camera roll", isPresented: $didExportSucceed) {
             Button("OK", role: .cancel) {}
         }
+        // Dopasowanie do przystanku zaplanowanej podróży (30.08.2026) —
+        // patrz `TripMemoryMatcher`/`checkTripMemoryMatch()`. Zawsze RĘCZNE
+        // potwierdzenie (ten sam duch co "Link to a Movie" w `TravelMapView`)
+        // — appka tylko PODPOWIADA, nigdy nie łączy po cichu.
+        .alert(
+            L("Link to your trip?"),
+            isPresented: .init(
+                get: { tripMemorySuggestion != nil },
+                set: { if !$0 { tripMemorySuggestion = nil } }
+            )
+        ) {
+            Button(L("Link")) {
+                if let suggestion = tripMemorySuggestion {
+                    suggestion.stop.linkedProjectID = project.id
+                    try? modelContext.save()
+                }
+                tripMemorySuggestion = nil
+            }
+            Button(L("Not Now"), role: .cancel) { tripMemorySuggestion = nil }
+        } message: {
+            if let suggestion = tripMemorySuggestion {
+                Text("\(L("This looks like it belongs to")) \(suggestion.trip.title) – \(suggestion.stop.cityName).")
+            }
+        }
         .alert("Export failed", isPresented: .init(
             get: { exportError != nil },
             set: { if !$0 { exportError = nil } }
@@ -257,6 +295,14 @@ struct EditView: View {
             .onChange(of: colorStyle) { _, _ in syncProject() }
             .sheet(isPresented: $isShowingStyle) {
                 StyleView(enabledTransitions: $enabledTransitions, colorStyle: $colorStyle)
+            }
+            .sheet(isPresented: $isShowingAIDirector) {
+                AIDirectorView(
+                    items: $items, colorStyle: $colorStyle, enabledTransitions: $enabledTransitions,
+                    selectedSong: $selectedSong
+                ) {
+                    syncProject()
+                }
             }
     }
 
@@ -525,6 +571,9 @@ struct EditView: View {
             ToolbarButton(icon: "paintpalette", title: L("Style"), isActive: colorStyle != .none) {
                 isShowingStyle = true
             }
+            ToolbarButton(icon: "sparkles", title: L("AI Director")) {
+                isShowingAIDirector = true
+            }
             ToolbarButton(icon: "textformat", title: L("Text"), isActive: !captions.isEmpty) {
                 isShowingCaptions = true
             }
@@ -671,6 +720,91 @@ struct EditView: View {
         }
     }
 
+    /// 23.08.2026 — TRZECI raport tego samego bugu (`-11838`), teraz
+    /// potwierdzone przez usera że powtarza się NIEZALEŻNIE od filtra Style i
+    /// jakości eksportu — wyklucza to `ColorGrader` (pomijany bez filtra) i
+    /// `canvasSize` jako jedyną przyczynę. Zamiast zgadywać CZWARTĄ z rzędu
+    /// poprawkę bez pewności, oznaczamy KTÓRY etap zawiódł — przy kolejnym
+    /// zgłoszeniu (jeśli błąd wróci) zrzut ekranu wskaże już konkretne
+    /// miejsce zamiast tylko surowego kodu AVFoundation.
+    private struct ExportStageError: Error {
+        let stage: String
+        let underlying: Error
+    }
+
+    /// Idzie w głąb `NSUnderlyingErrorKey` — `AVAssetExportSession` często
+    /// chowa bardziej konkretną przyczynę (np. błąd konkretnego kodeka/
+    /// zasobu) POD surowym `-11838`, którego samo domain/code nie ujawnia.
+    /// Tester nie ma konsoli Xcode, więc to musi zmieścić się w jednym
+    /// zrzucie ekranu z alertem.
+    private func describeErrorChain(_ error: Error) -> String {
+        var parts: [String] = []
+        var current: Error? = error
+        var depth = 0
+        while let err = current, depth < 5 {
+            let nsError = err as NSError
+            var part = "\(nsError.domain) \(nsError.code)"
+            if let reason = nsError.localizedFailureReason {
+                part += " (\(reason))"
+            }
+            parts.append(part)
+            current = nsError.userInfo[NSUnderlyingErrorKey] as? Error
+            depth += 1
+        }
+        return parts.joined(separator: " ← ")
+    }
+
+    /// 24.08.2026 — patrz komentarz przy wywołaniu. `os.Logger` (nie `print`)
+    /// — zwykły `print()` idzie na surowy stdout procesu i NIE trafia do
+    /// zunifikowanego logowania systemowego, więc `idevicesyslog`/Console bez
+    /// podłączonego Xcode go w ogóle nie widzi (odkryte dziś rano: pierwsza
+    /// wersja tej funkcji z `print` nie zostawiła ŻADNEGO śladu mimo
+    /// potwierdzonej awarii w tym samym momencie). `privacy: .public`
+    /// wszędzie — domyślnie os_log ukrywa interpolowane wartości jako
+    /// `<private>`, bez tego cała diagnostyka byłaby bezużyteczna.
+    private static let exportDiagnosticsLogger = Logger(subsystem: "com.piotrmarkowski.pmemories", category: "ExportDiagnostics")
+
+    private func logCompositionDiagnostics(_ project: VideoComposer.ComposedProject, items: [MediaItem]) {
+        let composition = project.composition
+        let log = Self.exportDiagnosticsLogger
+        log.notice("🔍 EXPORT DIAGNOSTICS — items: \(items.count, privacy: .public)")
+        for (index, item) in items.enumerated() {
+            log.notice("🔍   [\(index, privacy: .public)] isVideo=\(item.isVideo, privacy: .public) isLivePhoto=\(item.isLivePhoto, privacy: .public) duration=\(item.duration, privacy: .public) mutesBackgroundMusic=\(item.mutesBackgroundMusic, privacy: .public) transitionStyle=\(String(describing: item.transitionStyle), privacy: .public)")
+        }
+        log.notice("🔍 composition.duration=\(composition.duration.seconds, privacy: .public)")
+        log.notice("🔍 video tracks: \(composition.tracks(withMediaType: .video).count, privacy: .public)")
+        for track in composition.tracks(withMediaType: .video) {
+            let segments = track.segments.map { seg in
+                "target[\(seg.timeMapping.target.start.seconds)..<\(seg.timeMapping.target.end.seconds)]"
+            }.joined(separator: ", ")
+            log.notice("🔍   videoTrack id=\(track.trackID, privacy: .public) segments=[\(segments, privacy: .public)]")
+        }
+        log.notice("🔍 audio tracks: \(composition.tracks(withMediaType: .audio).count, privacy: .public)")
+        for track in composition.tracks(withMediaType: .audio) {
+            let segments = track.segments.map { seg in
+                "target[\(seg.timeMapping.target.start.seconds)..<\(seg.timeMapping.target.end.seconds)]"
+            }.joined(separator: ", ")
+            log.notice("🔍   audioTrack id=\(track.trackID, privacy: .public) segments=[\(segments, privacy: .public)]")
+        }
+        log.notice("🔍 videoComposition.renderSize=\(String(describing: project.videoComposition.renderSize), privacy: .public) frameDuration=\(project.videoComposition.frameDuration.seconds, privacy: .public)")
+        log.notice("🔍 videoComposition.instructions: \(project.videoComposition.instructions.count, privacy: .public)")
+        for (index, instruction) in project.videoComposition.instructions.enumerated() {
+            guard let instruction = instruction as? AVVideoCompositionInstruction else { continue }
+            log.notice("🔍   [\(index, privacy: .public)] timeRange=[\(instruction.timeRange.start.seconds, privacy: .public)..<\(instruction.timeRange.end.seconds, privacy: .public)] layers=\(instruction.layerInstructions.count, privacy: .public)")
+        }
+        log.notice("🔍 audioMix present=\(project.audioMix != nil, privacy: .public) musicSkippedAsProtected=\(project.musicSkippedAsProtected, privacy: .public)")
+    }
+
+    private func stage<T>(_ label: String, _ work: () async throws -> T) async throws -> T {
+        do {
+            return try await work()
+        } catch let error as ExportStageError {
+            throw error
+        } catch {
+            throw ExportStageError(stage: label, underlying: error)
+        }
+    }
+
     private func performExport() async {
         isExporting = true
         exportProgress = 0
@@ -736,48 +870,92 @@ struct EditView: View {
 
             // Wagi dobrane z dzisiejszej diagnozy — renderowanie zdjęć
             // (`buildComposition`) to dominujący koszt czasowy przy
-            // projektach z wieloma zdjęciami. Bez filtra: 0...0.6 / 0.6...1.0
-            // (jak dotąd). Z filtrem (`ColorGrader`, drugi pełny przebieg):
-            // dodatkowy odcinek na końcu, reszta ściśnięta żeby zmieścić.
+            // projektach z wieloma zdjęciami. Bez żadnego dodatkowego
+            // przebiegu: 0...0.6 / 0.6...1.0 (jak dotąd). Z filtrem
+            // kolorystycznym (`ColorGrader`) i/lub premium przejściami
+            // (`PremiumTransitionGrader`, 30.08.2026) — po jednym dodatkowym
+            // odcinku na KAŻDY użyty przebieg, reszta ściśnięta żeby
+            // zmieścić. `mayUsePremiumTransitions` liczone TU, przed
+            // `buildComposition` (nie po) — appka wie z wyprzedzeniem czy
+            // premium styl może się pojawić: ręcznym override per-klip w
+            // Trim, albo (dla Foundera, patrz `TesterRegistry.
+            // hasPremiumUnlocked`) przez pulę auto-doboru `enabledTransitions`.
             let hasColorStyle = colorStyle != .none
-            let buildWeight = hasColorStyle ? 0.45 : 0.6
-            let exportWeight = hasColorStyle ? 0.3 : 0.4
-            let gradeWeight = hasColorStyle ? 0.25 : 0.0
+            let mayUsePremiumTransitions = items.contains { $0.transitionStyle?.premiumEffect != nil }
+                || enabledTransitions.contains { $0.premiumEffect != nil }
+            let extraPasses = (hasColorStyle ? 1 : 0) + (mayUsePremiumTransitions ? 1 : 0)
+            let buildWeight = extraPasses > 0 ? 0.45 : 0.6
+            let exportWeight = extraPasses > 0 ? 0.3 : 0.4
+            let perPassWeight = extraPasses > 0 ? 0.25 / Double(extraPasses) : 0.0
+            let gradeWeight = hasColorStyle ? perPassWeight : 0.0
+            let premiumWeight = mayUsePremiumTransitions ? perPassWeight : 0.0
 
-            let composedProject = try await VideoComposer.buildComposition(
-                items: exportItems,
-                audioURL: selectedSong?.assetURL,
-                musicVolume: musicVolume,
-                captions: captions,
-                overlays: overlays,
-                quality: exportQuality,
-                enabledTransitionStyles: Array(enabledTransitions),
-                onProgress: { progress in exportProgress = progress * buildWeight }
-            )
+            let composedProject = try await stage("composition") {
+                try await VideoComposer.buildComposition(
+                    items: exportItems,
+                    audioURL: selectedSong?.assetURL,
+                    musicVolume: musicVolume,
+                    captions: captions,
+                    overlays: overlays,
+                    quality: exportQuality,
+                    enabledTransitionStyles: Array(enabledTransitions),
+                    onProgress: { progress in exportProgress = progress * buildWeight }
+                )
+            }
+            // 24.08.2026 — realny bug (`-11838`/`FigAssetExportSession
+            // -16976`, pada NATYCHMIAST w `createRemakerAndBeginExport`,
+            // przed czytaniem jakichkolwiek próbek) przetrwał już 6
+            // nieskutecznych, punktowych poprawek (kolor/kodek/współbieżność/
+            // preset/IOSurface/cicha ścieżka audio) — zamiast zgadywać
+            // siódmą zmienną naraz, pełny zrzut STRUKTURY kompozycji tuż
+            // przed `mainExport`, żeby przy kolejnym realnym powtórzeniu
+            // (patrz `print` niżej, trafia do device syslog) mieć KOMPLETNY
+            // obraz do porównania z udanymi eksportami, zamiast jednej
+            // zmiennej na raz.
+            logCompositionDiagnostics(composedProject, items: exportItems)
+
             // Plik(i) tymczasowe — sprzątane niezależnie od tego, czy filtr
             // był użyty, i niezależnie od tego czy eksport się powiódł
             // (04.08.2026, "apka ma być lekka i nie ma zaśmiecać telefonu").
             var renderedURL: URL?
+            var premiumGradedURL: URL?
             var gradedURL: URL?
             defer {
                 if let renderedURL { try? FileManager.default.removeItem(at: renderedURL) }
+                if let premiumGradedURL { try? FileManager.default.removeItem(at: premiumGradedURL) }
                 if let gradedURL { try? FileManager.default.removeItem(at: gradedURL) }
             }
-            let exportedURL = try await VideoExporter.export(composedProject: composedProject, onProgress: { progress in
-                exportProgress = buildWeight + progress * exportWeight
-            })
+            let exportedURL = try await stage("mainExport") {
+                try await VideoExporter.export(composedProject: composedProject, onProgress: { progress in
+                    exportProgress = buildWeight + progress * exportWeight
+                })
+            }
             renderedURL = exportedURL
 
             var finalURL = exportedURL
+            if !composedProject.premiumTransitionWindows.isEmpty {
+                let filtered = try await stage("premiumTransitionGrade") {
+                    try await PremiumTransitionGrader.apply(
+                        composedProject.premiumTransitionWindows, canvasSize: exportQuality.canvasSize, to: finalURL,
+                        onProgress: { progress in exportProgress = buildWeight + exportWeight + progress * premiumWeight }
+                    )
+                }
+                premiumGradedURL = filtered
+                finalURL = filtered
+            }
             if hasColorStyle {
-                let filtered = try await ColorGrader.apply(colorStyle, to: exportedURL, onProgress: { progress in
-                    exportProgress = buildWeight + exportWeight + progress * gradeWeight
-                })
+                let filtered = try await stage("colorGrade") {
+                    try await ColorGrader.apply(colorStyle, to: finalURL, onProgress: { progress in
+                        exportProgress = buildWeight + exportWeight + premiumWeight + progress * gradeWeight
+                    })
+                }
                 gradedURL = filtered
                 finalURL = filtered
             }
 
-            let assetIdentifier = try await VideoExporter.saveToPhotos(fileURL: finalURL)
+            let assetIdentifier = try await stage("saveToPhotos") {
+                try await VideoExporter.saveToPhotos(fileURL: finalURL)
+            }
             project.exportedAssetIdentifier = assetIdentifier
             syncProject()
             try? modelContext.save()
@@ -786,13 +964,31 @@ struct EditView: View {
                 title: L("Your movie is ready!"),
                 body: project.title.isEmpty ? L("Saved to your camera roll.") : project.title
             )
+            checkTripMemoryMatch()
+            resolveMemoryLocationIfNeeded()
         } catch {
             // Zamiast kryptycznego kodu AVFoundation ("Operation Stopped")
             // gdy iOS przerwał eksport bo appka zeszła z pierwszego planu —
             // patrz komentarz przy `wasBackgroundedDuringExport`.
-            let message = wasBackgroundedDuringExport
-                ? L("Export was interrupted because PMemories left the foreground. Keep the app open while exporting to avoid this.")
-                : error.localizedDescription
+            let message: String
+            if wasBackgroundedDuringExport {
+                message = L("Export was interrupted because PMemories left the foreground. Keep the app open while exporting to avoid this.")
+            } else {
+                // 23.08.2026 — drugi realny bug report testera z tym samym
+                // nieinformatywnym "Operation Stopped"/"ComposerError error 1",
+                // a tester nie ma dostępu do konsoli Xcode żeby przekazać coś
+                // więcej niż zrzut ekranu z samym alertem. Dotąd prawdziwy kod
+                // błędu AVFoundation ginął bezpowrotnie po zamknięciu alertu —
+                // ten sam problem co przy Travel Map (patrz
+                // `TravelMapVideoRenderer.lastProfileSummary`), to samo
+                // rozwiązanie: dopisujemy surowy domain/code wprost do
+                // komunikatu, więc sam zrzut ekranu wystarczy do diagnozy.
+                if let stageError = error as? ExportStageError {
+                    message = "\(stageError.underlying.localizedDescription) [\(stageError.stage): \(describeErrorChain(stageError.underlying))]"
+                } else {
+                    message = "\(error.localizedDescription) [\(describeErrorChain(error))]"
+                }
+            }
             exportError = message
             ExportNotifier.notify(title: L("Export failed"), body: message)
         }
@@ -820,8 +1016,9 @@ struct EditView: View {
     private func loadInitialSong() {
         musicVolume = project.musicVolume
         if let raw = project.enabledTransitionStylesRaw {
-            let parsed = Set(raw.split(separator: ",").compactMap { TransitionStyle(rawValue: String($0)) })
-            enabledTransitions = parsed.isEmpty ? Set(TransitionStyle.allCases) : parsed
+            let premiumUnlocked = TesterRegistry.hasPremiumUnlocked(AuthManager.shared.userIdentifier)
+            let parsed = Set(raw.split(separator: ",").compactMap { TransitionStyle(rawValue: String($0)) }.filter { !$0.isPremium || premiumUnlocked })
+            enabledTransitions = parsed.isEmpty ? Set(TransitionStyle.allCases.filter { !$0.isPremium || premiumUnlocked }) : parsed
         }
         colorStyle = project.colorStyleRaw.flatMap(ColorStyle.init(rawValue:)) ?? .none
         captions = project.captions.sorted(by: { $0.order < $1.order }).map { saved in
@@ -838,6 +1035,42 @@ struct EditView: View {
             value: persistentID, forProperty: MPMediaItemPropertyPersistentID
         ))
         selectedSong = query.items?.first
+    }
+
+    /// Wołane PO udanym eksporcie (30.08.2026) — sprawdza czy ten projekt
+    /// pasuje lokalizacją zdjęć do jakiegoś nieprzypisanego przystanku w
+    /// zaplanowanej podróży (`TripMemoryMatcher`), i jeśli tak, pyta usera
+    /// czy połączyć. Pomija projekty JUŻ powiązane z jakimkolwiek przystankiem
+    /// (żeby nie proponować drugiego linku dla tego samego filmu przy
+    /// ponownym eksporcie) i nie proponuje NIC gdy user właśnie odrzucił tę
+    /// samą propozycję w tej sesji edycji (`tripMemorySuggestion` zostaje
+    /// `nil` po "Not Now", `checkTripMemoryMatch` się nie odpala ponownie
+    /// samo z siebie — tylko po kolejnym eksporcie).
+    private func checkTripMemoryMatch() {
+        let alreadyLinked = savedTrips.contains { $0.stops.contains { $0.linkedProjectID == project.id } }
+        guard !alreadyLinked else { return }
+        tripMemorySuggestion = TripMemoryMatcher.bestMatch(for: project, trips: savedTrips)
+    }
+
+    /// Kraj/miasto z GPS zdjęć TEGO projektu (30.08.2026) — patrz komentarz
+    /// przy `SavedProject.detectedCountryCode`. Rozwiązywane RAZ (guard na
+    /// `nil`, nie nadpisuje przy kolejnych eksportach tego samego projektu)
+    /// i NIEZALEŻNIE od tego, czy `checkTripMemoryMatch` znalazło/user
+    /// potwierdził link do przystanku — link do przystanku dzieje się
+    /// asynchronicznie (dopiero po potwierdzeniu alertu przez usera), więc
+    /// appka nie może czekać na tę decyzję zanim zapisze wykrytą lokalizację.
+    /// `TravelAchievementsCalculator.explorerScore` sam pomija projekty JUŻ
+    /// powiązane z przystankiem, żeby uniknąć podwójnego liczenia.
+    private func resolveMemoryLocationIfNeeded() {
+        guard project.detectedCountryCode == nil, project.detectedCityName == nil else { return }
+        let identifiers = project.items.map(\.assetLocalIdentifier).filter { !$0.isEmpty }
+        guard !identifiers.isEmpty, let location = MediaAssetLoader.firstLocation(forAssetLocalIdentifiers: identifiers) else { return }
+        Task {
+            guard let resolved = await CityGeocoder.reverseResolveFull(location) else { return }
+            project.detectedCountryCode = resolved.countryCode
+            project.detectedCityName = resolved.city
+            try? modelContext.save()
+        }
     }
 
     /// Zapisuje bieżący stan (kolejność, ruch Live Photo, czas trwania,

@@ -41,6 +41,15 @@ enum LivePhotoVideoExtractor {
             }
         }
 
+        // 23.08.2026 — ta sama walidacja co `MediaAssetLoader.videoURL`
+        // (patrz komentarz tam): `writeData` bez błędu nie gwarantuje
+        // kompletnego, odtwarzalnego pliku.
+        do {
+            try await MediaAssetLoader.validatePlayableVideo(at: destination)
+        } catch {
+            throw ExtractionError.pairedVideoResourceNotFound
+        }
+
         return destination
     }
 }

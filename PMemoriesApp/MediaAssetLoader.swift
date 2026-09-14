@@ -39,7 +39,26 @@ enum MediaAssetLoader {
                 if let error { continuation.resume(throwing: error) } else { continuation.resume() }
             }
         }
+        // 23.08.2026 — `writeData` kończy się bez błędu, ale to NIE gwarantuje
+        // że zapisany plik jest kompletnym, poprawnym wideo (np. przerwane
+        // pobieranie z iCloud mogło zostawić okrojony plik). Bez tej
+        // kontroli taki plik szedł prosto do kompozycji/eksportu i dawał
+        // dopiero tam kryptyczny błąd AVFoundation. Sprawdzenie TERAZ daje
+        // jasny, konkretny błąd we właściwym miejscu.
+        try await Self.validatePlayableVideo(at: destination)
         return destination
+    }
+
+    /// Wspólna walidacja dla `videoURL` tutaj i `LivePhotoVideoExtractor.
+    /// pairedVideoURL` — plik istnieje i `writeData` nie zwrócił błędu, ale
+    /// to jeszcze nie znaczy że da się go użyć w kompozycji.
+    static func validatePlayableVideo(at url: URL) async throws {
+        let asset = AVURLAsset(url: url)
+        let duration = try await asset.load(.duration)
+        let tracks = try await asset.load(.tracks)
+        guard duration.isValid, duration.seconds > 0, tracks.contains(where: { $0.mediaType == .video }) else {
+            throw LoadError.videoResourceNotFound
+        }
     }
 
     /// UWAGA: mimo nazwy, ten sam zwrócony obraz karmi też finalny eksport
@@ -55,6 +74,45 @@ enum MediaAssetLoader {
     /// `PHImageManagerMaximumSize` (zwraca zawsze oryginalny kadr) — zgodnie
     /// z zasadą "żadnego przycinania" reszty appki.
     static func thumbnail(forAssetLocalIdentifier identifier: String) async -> UIImage? {
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil)
+        guard let asset = fetchResult.firstObject else { return nil }
+
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .highQualityFormat
+        options.isNetworkAccessAllowed = true
+        options.isSynchronous = false
+
+        // 30.08.2026 — ta sama naprawa co `MediaItemLoader.downsampledImage`:
+        // `PHImageManagerMaximumSize` zwraca zdjęcie w PEŁNEJ rozdzielczości
+        // źródła tylko po to, żeby zrobić z niego miniaturkę osi czasu —
+        // przy projekcie z wieloma elementami (np. ~140) to samo ryzyko
+        // cichego zabicia appki przez iOS (jetsam) przy PONOWNYM otwarciu
+        // już zapisanego projektu, nie tylko przy pierwszym imporcie.
+        return await withCheckedContinuation { continuation in
+            PHImageManager.default().requestImage(
+                for: asset, targetSize: CGSize(width: 640, height: 640),
+                contentMode: .aspectFit, options: options
+            ) { image, _ in
+                continuation.resume(returning: image)
+            }
+        }
+    }
+
+    /// Zdjęcie w PEŁNEJ rozdzielczości źródła — WYŁĄCZNIE dla faktycznego
+    /// renderu eksportu (`VideoComposer.resolveSourceURL`/
+    /// `resolveOverlaySourceURL` → `ImageToVideoRenderer`), NIGDY dla
+    /// wyświetlania w UI (do tego służy mała `thumbnail(forAssetLocalIdentifier:)`
+    /// wyżej). Rozdzielone 30.08.2026 — wcześniej export używał WPROST
+    /// `MediaItem.thumbnail`/`OverlayItem.thumbnail`, więc zmniejszenie tamtej
+    /// miniaturki (naprawa cichego zabijania appki przez iOS przy dużych
+    /// selekcjach, patrz `thumbnail(forAssetLocalIdentifier:)`) po cichu
+    /// przywróciło DOKŁADNIE ten sam bug jakości co 29.07.2026 ("zdjęcia nie
+    /// są już tej samej jakości") — komentarz przy `thumbnail(forAssetLocalIdentifier:)`
+    /// nawet o tym ostrzegał, przeoczony przy tamtej naprawie. Bezpieczne
+    /// pamięciowo mimo pełnej rozdzielczości: `VideoComposer.resolveSourceURLs`
+    /// renderuje zdjęcia SEKWENCYJNIE (`maxConcurrent = 1`), więc w pamięci
+    /// jest naraz najwyżej JEDEN taki obraz, nie wszystkie zdjęcia projektu.
+    static func fullResolutionImage(forAssetLocalIdentifier identifier: String) async -> UIImage? {
         let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil)
         guard let asset = fetchResult.firstObject else { return nil }
 

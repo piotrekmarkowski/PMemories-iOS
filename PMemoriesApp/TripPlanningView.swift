@@ -2,6 +2,17 @@ import SwiftUI
 import SwiftData
 import MapKit
 
+/// Który widok pokazuje `TripPlanningView` pod segmented control na górze
+/// ekranu (26.08.2026, user: "trip planner? nie będzie lepszy?" → "albo
+/// zostawmy jak jest?" → "zostawiamy, robimy tylko dodatkową zakładkę" —
+/// czyli BEZ scalania modeli/nazw, tylko drugi segment obok istniejącego
+/// "Planned" w TYM SAMYM ekranie). Ten sam wzorzec co `TravelSegment`
+/// (Map/Globe) w `TravelMapView.swift`.
+private enum PlanningSegment: Hashable {
+    case planned
+    case completed
+}
+
 /// "Trip Planning / My Next Journey" — Etap 1 (`Docs/TODO.md`, P1 z analizy
 /// konkurencji 10.08.2026), model zrewidowany 11.08.2026 na podstawie
 /// przemyślanego feedbacku usera (patrz `PlannedTripPersistence.swift` po
@@ -17,18 +28,64 @@ struct TripPlanningView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PlannedTrip.createdAt, order: .reverse) private var plannedTrips: [PlannedTrip]
     @Binding var selectedTab: MainTab
-    @Binding var pendingTravelMapPrefillStops: [TripStop]?
+    /// Bez bezpośredniego dostępu do stanu Home ("Create Memory" faktycznie
+    /// otwiera picker zdjęć w Home, nie tutaj) — samo ID przekazane przez
+    /// zakładkę, patrz `HomeView.pendingCreateMemoryFromPlannedTripID`.
+    @Binding var pendingCreateMemoryFromPlannedTripID: UUID?
 
+    @State private var planningSegment: PlanningSegment = .planned
     @State private var editingTrip: PlannedTrip?
+
+    /// Segment "Planned" — TYLKO podróże które jeszcze się NIE odbyły
+    /// (`!looksCompleted`, 26.08.2026 poprawka po tym jak user zwrócił
+    /// uwagę, że pierwsza wersja pomyliła to z `SavedTrip`/Travel Mapą: "co
+    /// mapa ma wspólnego z planowanymi podróżami???" — `looksCompleted` już
+    /// istniał w `PlannedTripPersistence.swift`, budowany dla przycisku
+    /// "Create Memory from this trip"). Kolejka od najbliższej do
+    /// najdalszej wg `effectiveStartDate` — podróże bez żadnej daty lądują
+    /// na końcu, nie zgadujemy czy są "bliskie".
+    private var upcomingTrips: [PlannedTrip] {
+        plannedTrips.filter { !$0.looksCompleted }.sorted { a, b in
+            switch (a.effectiveStartDate, b.effectiveStartDate) {
+            case let (dateA?, dateB?): return dateA < dateB
+            case (nil, nil): return false
+            case (nil, _): return false
+            case (_, nil): return true
+            }
+        }
+    }
+
+    /// Segment "Completed" — TE SAME `PlannedTrip`, tylko te którym minął
+    /// termin (`looksCompleted`), NIE `SavedTrip`/Travel Mapa (osobny,
+    /// niepowiązany model — zostaje wyłącznie w Achievements, jak było).
+    /// Najświeżej zakończona na górze (`effectiveEndDate` malejąco).
+    private var completedTrips: [PlannedTrip] {
+        plannedTrips.filter(\.looksCompleted).sorted {
+            ($0.effectiveEndDate ?? .distantPast) > ($1.effectiveEndDate ?? .distantPast)
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            Group {
-                if plannedTrips.isEmpty {
-                    emptyState
-                } else {
-                    list
+            VStack(spacing: 0) {
+                planningSegmentHeader
+                Group {
+                    switch planningSegment {
+                    case .planned:
+                        if upcomingTrips.isEmpty {
+                            emptyState
+                        } else {
+                            tripsList(upcomingTrips)
+                        }
+                    case .completed:
+                        if completedTrips.isEmpty {
+                            completedEmptyState
+                        } else {
+                            tripsList(completedTrips)
+                        }
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .tabSkinBackground()
             // BUG znaleziony 11.08.2026 (user: "napis Planowanie podróży
@@ -37,14 +94,18 @@ struct TripPlanningView: View {
             // `.navigationTitle` nie reaguje na kolor skórki w tle (system
             // zawsze rysuje go domyślnym kolorem trybu jasny/ciemny, nie
             // wg zdjęcia). Ten sam sprawdzony fix: pusty systemowy tytuł +
-            // WŁASNY tekst jako pierwszy wiersz listy (`skinAwareHeading()`,
-            // pełna kontrola koloru) — patrz `list` niżej.
+            // WŁASNY tekst w `planningSegmentHeader` (pełna kontrola koloru).
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(action: addTrip) {
-                        Image(systemName: "plus")
+                // "+" tylko dla "Planned" (26.08.2026) — "Completed" nie ma
+                // ręcznego dodawania, podróże trafiają tam z Travel Map/
+                // Convert Trip → Memory.
+                if planningSegment == .planned {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(action: addTrip) {
+                            Image(systemName: "plus")
+                        }
                     }
                 }
             }
@@ -56,11 +117,38 @@ struct TripPlanningView: View {
                     && (trip.stops ?? []).allSatisfy { $0.cityName.trimmingCharacters(in: .whitespaces).isEmpty }
                 PlannedTripDetailView(
                     trip: trip, selectedTab: $selectedTab,
-                    pendingTravelMapPrefillStops: $pendingTravelMapPrefillStops,
+                    pendingCreateMemoryFromPlannedTripID: $pendingCreateMemoryFromPlannedTripID,
                     startInEditMode: isBlank
                 )
             }
         }
+    }
+
+    private var planningSegmentHeader: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L("Trip Planning"))
+                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .skinAwareHeading()
+
+            Picker("", selection: $planningSegment) {
+                Text(L("Planned")).tag(PlanningSegment.planned)
+                Text(L("Completed")).tag(PlanningSegment.completed)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    /// "No trips" dla segmentu "Completed" — bez CTA "New Trip" (26.08.2026)
+    /// bo tu nic się ręcznie nie dodaje, podróże lądują tu SAME, gdy ich
+    /// termin minie.
+    private var completedEmptyState: some View {
+        Text(L("Trips you've completed will show up here."))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var emptyState: some View {
@@ -90,30 +178,35 @@ struct TripPlanningView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var list: some View {
+    /// Wspólna lista dla OBU segmentów (26.08.2026) — te same wiersze/akcje
+    /// dla nadchodzących i zakończonych `PlannedTrip`, różni je tylko KTÓRA
+    /// tablica jest podana (`upcomingTrips`/`completedTrips` w `body`).
+    /// Nagłówek "Planned Trips" PRZENIESIONY do `planningSegmentHeader` —
+    /// etykieta segmentu już mówi w której liście jesteśmy (ten sam porządek
+    /// co "Travel Map" przeniesione do `travelSegmentHeader` 21.08.2026).
+    private func tripsList(_ trips: [PlannedTrip]) -> some View {
         List {
-            // Inny tekst niż etykieta zakładki (11.08.2026, user: "w
-            // nagłówku powinno być zaplanowane podróże czy coś w tym
-            // stylu") — ten sam wzorzec co "Library" (zakładka) / "Play
-            // Memories" (nagłówek listy) w `LibraryView`: nazwa zakładki
-            // opisuje SEKCJĘ, nagłówek nad listą opisuje ZAWARTOŚĆ.
-            Text(L("Planned Trips"))
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
-                .skinAwareHeading()
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
-
-            ForEach(plannedTrips) { trip in
+            ForEach(trips) { trip in
                 Button {
                     editingTrip = trip
                 } label: {
                     row(for: trip)
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    // "Podziel się jako szablon" (26.08.2026) — patrz
+                    // `PlannedTrip.templateTransferDTO`: inspiracja dla
+                    // kogoś kto NIE leci z nami, bez dat/kosztów/noclegu.
+                    // Osobne od pełnego współdzielenia w
+                    // `PlannedTripDetailView` (tam żywa synchronizacja z
+                    // towarzyszem TEJ SAMEJ podróży).
+                    ShareLink(item: trip.templateTransferDTO, preview: SharePreview(trip.title.isEmpty ? L("New Trip") : trip.title)) {
+                        Label(L("Share as Template"), systemImage: "square.and.arrow.up")
+                    }
+                }
             }
             .onDelete { indices in
-                for index in indices { modelContext.delete(plannedTrips[index]) }
+                for index in indices { modelContext.delete(trips[index]) }
             }
         }
         .scrollContentBackground(.hidden)
@@ -226,7 +319,10 @@ struct TripPlanningView: View {
 private struct PlannedTripDetailView: View {
     @Bindable var trip: PlannedTrip
     @Binding var selectedTab: MainTab
-    @Binding var pendingTravelMapPrefillStops: [TripStop]?
+    /// Bez bezpośredniego dostępu do stanu Home ("Create Memory" faktycznie
+    /// otwiera picker zdjęć w Home, nie tutaj) — samo ID przekazane przez
+    /// zakładkę, patrz `HomeView.pendingCreateMemoryFromPlannedTripID`.
+    @Binding var pendingCreateMemoryFromPlannedTripID: UUID?
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @State private var isEditing: Bool
@@ -255,11 +351,12 @@ private struct PlannedTripDetailView: View {
 
     init(
         trip: PlannedTrip, selectedTab: Binding<MainTab>,
-        pendingTravelMapPrefillStops: Binding<[TripStop]?>, startInEditMode: Bool
+        pendingCreateMemoryFromPlannedTripID: Binding<UUID?>,
+        startInEditMode: Bool
     ) {
         self.trip = trip
         self._selectedTab = selectedTab
-        self._pendingTravelMapPrefillStops = pendingTravelMapPrefillStops
+        self._pendingCreateMemoryFromPlannedTripID = pendingCreateMemoryFromPlannedTripID
         self._isEditing = State(initialValue: startInEditMode)
     }
 
@@ -652,11 +749,16 @@ private struct PlannedTripDetailView: View {
     }
 
     private func convert() {
-        let prefill = trip.asTripStops
+        let tripID = trip.id
         dismiss()
-        pendingTravelMapPrefillStops = prefill
-        modelContext.delete(trip)
-        selectedTab = .travel
+        // Home odbierze to ID w `.onChange(of: selectedTab)` i sam otworzy
+        // picker zdjęć — patrz `HomeView.pendingCreateMemoryFromPlannedTripID`.
+        // `PlannedTrip` NIE jest kasowana tutaj: dopiero Home, po faktycznym
+        // utworzeniu filmu (`HomeView.loadSelection`) — inaczej samo wyjście
+        // z pickera bez wybrania zdjęć traci podróż bezpowrotnie (dokładnie
+        // ten bug, który user zgłosił 09.09.2026 dla Braszowa).
+        pendingCreateMemoryFromPlannedTripID = tripID
+        selectedTab = .home
     }
 
     /// Wysyła podróż na serwer i zamienia otrzymane ID w Universal Link
@@ -1070,6 +1172,7 @@ private struct PlannedStopRow: View {
     /// widoczne dni to znowu te z `maxDayCount`, ewentualny pusty dzień
     /// dodany ponad to znika. Zainicjalizowane w `.onAppear`.
     @State private var visibleDayCount = 1
+    @State private var isShowingPeakSearch = false
 
     private var isFirst: Bool { stepIndex == 1 }
 
@@ -1078,6 +1181,8 @@ private struct PlannedStopRow: View {
             headerRow
             cityField
             suggestionsList
+            unresolvedLocationHint
+            peakSearchButton
             transportTimesRow
             transportCostSection
             if !isFirst {
@@ -1092,6 +1197,7 @@ private struct PlannedStopRow: View {
                 // trzeba — dla miasta startowego to mylące/zbędne.
                 accommodationSection
                 stayDatesSection
+                weatherStripSection
                 placesToVisitSection
             }
             notesField
@@ -1099,6 +1205,46 @@ private struct PlannedStopRow: View {
         .padding(.vertical, 4)
         .onAppear {
             visibleDayCount = maxDayCount
+        }
+        .sheet(isPresented: $isShowingPeakSearch) {
+            PeakSearchView { peak in
+                // 12.09.2026, user: "nie da sie wybrac szczytu jako miejsca
+                // docelowego" — realny bug. `cityField`'s `.onChange(of:
+                // stop.cityName)` zeruje `stop.coordinate` i odpala
+                // `completer.updateQuery(...)` na KAŻDĄ zmianę nazwy miasta.
+                // Pierwsza poprawka (wcześniej dziś) dodała strażnik
+                // `isApplyingSuggestion`, ale resetowała go z powrotem na
+                // `false` OD RAZU, w TEJ SAMEJ synchronicznej domknięciu —
+                // user zgłosił że dalej nie działa ("nie wlasnie wybralem
+                // rysy"). Przyczyna: SwiftUI/Observation batchuje wszystkie
+                // zmiany z jednego przebiegu w JEDEN cykl aktualizacji —
+                // `.onChange(of: stop.cityName)` widział więc `isApplyingSuggestion`
+                // już z powrotem `false` (bo zdążyłem go zresetować
+                // zanim guard w ogóle zdążył zadziałać), strażnik nigdy
+                // realnie nie chronił. `select(_:)` niżej unika tego przez
+                // reset W OSOBNYM `Task` (po `await`) — TEN SAM wzorzec
+                // tutaj, mimo że reszta jest w pełni synchroniczna: reset
+                // musi trafić na KOLEJNY przebieg pętli zdarzeń, nie na ten
+                // sam.
+                isApplyingSuggestion = true
+                stop.cityName = peak.name
+                stop.coordinate = peak.coordinate
+                stop.country = peak.country
+                stop.countryCode = peak.countryCode
+                completer.clear()
+                Task { isApplyingSuggestion = false }
+            }
+        }
+    }
+
+    /// Pasek prognozy prowadzący do dnia przyjazdu (12.09.2026) — tylko gdy
+    /// lokalizacja jest rozwiązana (szczyt znaleziony przez `peakSearchButton`
+    /// albo zwykłe miasto) I znamy datę przyjazdu (`checkInDate`, puste dla
+    /// `.home` — patrz `stayDatesSection`).
+    @ViewBuilder
+    private var weatherStripSection: some View {
+        if let coordinate = stop.coordinate, let checkInDate = stop.checkInDate {
+            TripWeatherStrip(coordinate: coordinate, tripDate: checkInDate)
         }
     }
 
@@ -1133,11 +1279,57 @@ private struct PlannedStopRow: View {
     private var cityField: some View {
         TextField(isFirst ? L("Starting city") : L("Destination"), text: $stop.cityName)
             .focused($isFocused)
+            // 03.09.2026, ten sam bug co `TravelMapView.StopRow`: iOS
+            // autokorekta potrafiła po cichu podmienić nietypową nazwę
+            // miasta na inne, podobnie brzmiące słowo ze słownika.
+            .autocorrectionDisabled()
             .onChange(of: stop.cityName) { _, newValue in
                 guard !isApplyingSuggestion else { return }
                 stop.coordinate = nil
                 completer.updateQuery(newValue)
             }
+            .onChange(of: isFocused) { _, focused in
+                // 23.08.2026 — bez tego stare podpowiedzi zostawały widoczne
+                // (`suggestionsList`) nawet po odejściu z pola bez wyboru
+                // żadnej z nich, myląc się z nowym `unresolvedLocationHint`
+                // niżej.
+                if !focused { completer.clear() }
+            }
+    }
+
+    /// 23.08.2026 — realny bug report testerki: wpisała "Gatwick" jako
+    /// miasto startowe, ale nie kliknęła podpowiedzi z listy (`select(_:)`
+    /// niżej to jedyne miejsce ustawiające `stop.coordinate`) — appka po
+    /// cichu zostawiła ten przystanek bez współrzędnych, więc na podglądzie
+    /// trasy (`RouteMapCard`) nie było ani pinezki, ani linii do niego, bez
+    /// żadnego ostrzeżenia że coś nie zostało zatwierdzone. Zamiast zgadywać
+    /// współrzędne z samego tekstu (świadomie odrzucone już 11.08.2026),
+    /// appka teraz PRZYNAJMNIEJ mówi userowi że musi wybrać podpowiedź.
+    @ViewBuilder
+    private var unresolvedLocationHint: some View {
+        if !isFocused && !stop.cityName.isEmpty && stop.coordinate == nil {
+            Label(L("Tap a suggestion from the list so this place appears on the map"), systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+    }
+
+    /// Dopełnienie zwykłego wyszukiwania miast (12.09.2026) — `CitySearchCompleter`
+    /// (baza Apple) zwykle nie zna szczytów górskich (np. "Rysy"), więc
+    /// przystanek zostawał bez rozwiązanej lokalizacji na zawsze. Ten sam
+    /// Overpass/OSM co `PeakSearchView` w `TravelMapView` (aktywna podróż),
+    /// tylko tutaj ustawia lokalizację PLANOWANEGO przystanku zamiast
+    /// dodawać nowy `TripStop`.
+    @ViewBuilder
+    private var peakSearchButton: some View {
+        if stop.coordinate == nil {
+            Button {
+                isShowingPeakSearch = true
+            } label: {
+                Label(L("Search for a peak"), systemImage: "mountain.2")
+                    .font(.caption)
+            }
+        }
     }
 
     @ViewBuilder
@@ -1286,11 +1478,13 @@ private struct PlannedStopRow: View {
                     text: Binding(get: { stop.accommodationName ?? "" }, set: { stop.accommodationName = $0 })
                 )
                 .font(.caption)
+                .autocorrectionDisabled()
                 TextField(
                     L("Address (optional)"),
                     text: Binding(get: { stop.accommodationAddress ?? "" }, set: { stop.accommodationAddress = $0 })
                 )
                 .font(.caption)
+                .autocorrectionDisabled()
                 // Koszt noclegu (12.08.2026, Budget) — waluta CAŁEJ podróży
                 // (`stop.trip`), nie osobna per przystanek, żeby suma miała
                 // sens bez przeliczania kursów.
@@ -1436,7 +1630,7 @@ private struct PlannedStopRow: View {
         isFocused = false
         completer.clear()
         Task {
-            if let (coordinate, country, countryCode, localizedCityName) = await CitySearchCompleter.resolve(suggestion) {
+            if let (coordinate, country, countryCode, localizedCityName, _) = await CitySearchCompleter.resolve(suggestion) {
                 stop.coordinate = coordinate
                 stop.country = country
                 stop.countryCode = countryCode
@@ -1534,6 +1728,7 @@ private struct DayPlacesSection: View {
                 TextField(L("Add a place"), text: $newPlaceName)
                     .font(.caption)
                     .focused($isFocused)
+                    .autocorrectionDisabled()
                     .onChange(of: newPlaceName) { _, newValue in
                         completer.updateQuery(newValue)
                     }

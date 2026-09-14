@@ -14,6 +14,13 @@ struct StyleView: View {
     @Binding var colorStyle: ColorStyle
     @Environment(\.dismiss) private var dismiss
 
+    /// Premium przejścia odblokowane TYLKO dla Foundera już dziś (30.08.2026,
+    /// user: "to bedzie zachowane dla premium i dla mnie") — patrz
+    /// `TesterRegistry.hasPremiumUnlocked`.
+    private var isPremiumUnlocked: Bool {
+        TesterRegistry.hasPremiumUnlocked(AuthManager.shared.userIdentifier)
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -40,7 +47,7 @@ struct StyleView: View {
                 }
 
                 Section {
-                    ForEach(TransitionStyle.allCases) { style in
+                    ForEach(TransitionStyle.allCases.filter { !$0.isPremium }) { style in
                         Button {
                             toggle(style)
                         } label: {
@@ -59,6 +66,47 @@ struct StyleView: View {
                     Text(L("Transitions"))
                 } footer: {
                     Text(L("Choose which transitions PMemories can use — it will spread the ones you pick automatically between your clips."))
+                }
+
+                // Premium przejścia (30.08.2026, user: "wprowadz jako
+                // premium") — widoczne dla wszystkich, ale zablokowane
+                // (kłódka) dopóki appka nie ma systemu płatności. WYJĄTEK:
+                // Founder ma już dziś pełny dostęp na własnym telefonie
+                // (user: "to bedzie zachowane dla premium i dla mnie") —
+                // ten sam toggle/checkmark co zwykłe style, patrz
+                // `isPremiumUnlocked`.
+                Section {
+                    ForEach(TransitionStyle.allCases.filter(\.isPremium)) { style in
+                        if isPremiumUnlocked {
+                            Button {
+                                toggle(style)
+                            } label: {
+                                HStack {
+                                    Text(style.label)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    if enabledTransitions.contains(style) {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(Palette.blue)
+                                    }
+                                }
+                            }
+                        } else {
+                            HStack {
+                                Text(style.label)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Image(systemName: "lock.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text(L("Premium Transitions"))
+                } footer: {
+                    Text(isPremiumUnlocked
+                        ? L("Early access — unlocked just for the Founder for now.")
+                        : L("Coming soon — unlock with a future PMemories subscription."))
                 }
             }
             .navigationTitle(L("Style"))

@@ -71,12 +71,22 @@ final class PlannedTrip {
     /// wygrywa". Patrz `TripPlanningView.PlannedTripDetailView`.
     var shareID: String?
 
+    /// Karta "Welcome back" na Home trwale wyciszona dla TEJ podróży
+    /// (09.09.2026, user: dostał kartę-przypomnienie o Rumunii, nie chciał
+    /// jeszcze tworzyć filmu, ale to blokowało pokazanie kolejnej,
+    /// nadchodzącej podróży za 9 dni — `featuredPlannedTrip` ma tylko JEDNO
+    /// miejsce na Home, `justCompleted` miało pierwszeństwo bezwarunkowo).
+    /// Ten sam duch co `SavedStop.isHiddenFromOnThisDay` — chowa TYLKO
+    /// przypomnienie, sama podróż zostaje w pełni widoczna/edytowalna w
+    /// Trip Planning (i wciąż można stamtąd ręcznie stworzyć film).
+    var isMemoryPromptDismissed: Bool = false
+
     init(
         id: UUID = UUID(), title: String, tripDescription: String = "",
         startDate: Date? = nil, endDate: Date? = nil, createdAt: Date = Date(), stops: [PlannedStop] = [],
         currencyCode: String = Locale.current.currency?.identifier ?? "USD",
         flightCostAmount: Double? = nil, estimatedCostAmount: Double? = nil, isWholePackage: Bool = false,
-        shareID: String? = nil
+        shareID: String? = nil, isMemoryPromptDismissed: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -90,6 +100,7 @@ final class PlannedTrip {
         self.estimatedCostAmount = estimatedCostAmount
         self.isWholePackage = isWholePackage
         self.shareID = shareID
+        self.isMemoryPromptDismissed = isMemoryPromptDismissed
     }
 }
 
@@ -524,8 +535,20 @@ extension PlannedTrip {
     /// gdy user faktycznie nie chce jeszcze tego zrobić (może wciąż edytować
     /// zdjęcia gdzie indziej). Po tym oknie karta po prostu znika, Convert
     /// wciąż dostępny ręcznie w Trip Planning.
+    ///
+    /// 12.09.2026, user: "jesli nie bylo dokladnej daty podrozy to nie
+    /// wracal bym ze wspomnieniami" — realny przypadek: bezimienna testowa
+    /// podróż (Zakopane → Rysy, dodana przy testowaniu wyszukiwania
+    /// szczytu) bez `startDate`/`endDate` na poziomie CAŁEJ podróży, tylko
+    /// z przypadkowym `checkInDate` na JEDNYM przystanku — a mimo to
+    /// wywołała "Welcome back", bo dawniej `effectiveEndDate` (fallback na
+    /// daty przystanków, gdy user nie wypełnił dat całej podróży) był
+    /// wystarczający. Teraz wymaga PRAWDZIWEJ, jawnie ustawionej daty
+    /// końca podróży (`endDate` wprost, bez fallbacku) — user musiał
+    /// faktycznie zaplanować/wypełnić kiedy podróż się kończy, nie
+    /// przypadkowa data jednego przystanku.
     var justCompleted: Bool {
-        guard looksCompleted, let end = effectiveEndDate else { return false }
+        guard let end = endDate, end < Date() else { return false }
         let calendar = Calendar.current
         let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: end), to: calendar.startOfDay(for: Date())).day ?? 0
         return days >= 0 && days <= 7

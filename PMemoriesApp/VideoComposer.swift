@@ -19,6 +19,16 @@ enum VideoComposer {
         let composition: AVMutableComposition
         let videoComposition: AVMutableVideoComposition
         let audioMix: AVMutableAudioMix?
+        /// 23.08.2026 — `true` gdy user wybrał piosenkę, ale appka pominęła
+        /// ją PRZED eksportem zamiast wysadzić cały film. Patrz komentarz
+        /// przy `audioAsset.load(.isExportable)` niżej.
+        let musicSkippedAsProtected: Bool
+        /// Okna czasowe premium przejść (30.08.2026, `PremiumTransitionEffect`)
+        /// użytych w TEJ kompozycji — puste dla projektów bez żadnego (czyli
+        /// dziś praktycznie zawsze, dopóki appka nie ma płatności). `EditView`
+        /// odpala `PremiumTransitionGrader` jako trzeci, opcjonalny przebieg
+        /// TYLKO gdy ta lista nie jest pusta.
+        let premiumTransitionWindows: [PremiumTransitionWindow]
     }
 
     /// Jeden umieszczony na timeline klip — potrzebne osobno od samego
@@ -50,6 +60,52 @@ enum VideoComposer {
     /// klipów równa długości utworu i tak dałaby finalny film KRÓTSZY o
     /// (liczba przejść) × czas przejścia.
     static let transitionDuration = CMTime(seconds: 0.4, preferredTimescale: 600)
+
+    /// Dokleja niesłyszalną ciszę jako ścieżkę audio, gdy kompozycja inaczej
+    /// miałaby ich ZERO (patrz komentarz w `buildComposition` przy wywołaniu)
+    /// — 23.08.2026, obejście realnego buga `FigAssetExportSession -16976`.
+    private static func ensureAudioTrackExists(in composition: AVMutableComposition, duration: CMTime) async throws {
+        guard composition.tracks(withMediaType: .audio).isEmpty, duration > .zero else { return }
+        let silenceURL = try makeSilentAudioFile(duration: duration.seconds)
+        defer { try? FileManager.default.removeItem(at: silenceURL) }
+        let silentAsset = AVURLAsset(url: silenceURL)
+        guard let silentAssetTrack = try await silentAsset.loadTracks(withMediaType: .audio).first,
+              let compositionTrack = composition.addMutableTrack(
+                  withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid
+              ) else { return }
+        let silentDuration = try await silentAsset.load(.duration)
+        try compositionTrack.insertTimeRange(
+            CMTimeRange(start: .zero, duration: min(silentDuration, duration)), of: silentAssetTrack, at: .zero
+        )
+    }
+
+    /// Zapisuje krótki plik ciszy PCM (`.caf`) o zadanej długości w
+    /// sekundach — pisany kawałkami zamiast jednym wielkim buforem, żeby nie
+    /// alokować pamięci proporcjonalnie do (potencjalnie długiego) czasu
+    /// trwania filmiku na raz.
+    private static func makeSilentAudioFile(duration: Double) throws -> URL {
+        let sampleRate = 44100.0
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
+            throw ComposerError.noUsableItems
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("caf")
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let chunkFrameCapacity: AVAudioFrameCount = 4096
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrameCapacity) else {
+            throw ComposerError.noUsableItems
+        }
+        buffer.frameLength = chunkFrameCapacity
+        var remainingFrames = Int(duration * sampleRate)
+        while remainingFrames > 0 {
+            let framesToWrite = min(remainingFrames, Int(chunkFrameCapacity))
+            buffer.frameLength = AVAudioFrameCount(framesToWrite)
+            try file.write(from: buffer)
+            remainingFrames -= framesToWrite
+        }
+        return url
+    }
 
     static func buildComposition(
         items: [MediaItem], audioURL: URL?, musicVolume: Double = 1.0, captions: [Caption] = [],
@@ -230,9 +286,28 @@ enum VideoComposer {
         }
 
         var musicTrack: AVMutableCompositionTrack?
+        var musicSkippedAsProtected = false
         if let audioURL {
             let audioAsset = AVURLAsset(url: audioURL)
-            if let audioAssetTrack = try await audioAsset.loadTracks(withMediaType: .audio).first,
+            // 23.08.2026 — CZWARTY realny bug report tego samego bugu
+            // (`-11838`, wcześniejsze poprawki: przestrzeń kolorów, walidacja
+            // pliku iCloud, ProRes→HEVC — ŻADNA nie pomogła). Piosenki z
+            // Apple Music, które są tylko STREAMOWANE (nie pobrane/kupione
+            // na stałe), mają `MPMediaItem.assetURL` wskazujący na chroniony
+            // DRM zasób — jego WCZYTANIE (tracks/duration) często się udaje,
+            // ale próba PRZEKODOWANIA w `AVAssetExportSession` (dopiero na
+            // etapie `mainExport`) jest przez Apple świadomie zablokowana i
+            // kończy się dokładnie tym samym "operacja nieobsługiwana dla
+            // tego medium" — pasuje idealnie do tego że błąd był 100%
+            // powtarzalny NIEZALEŻNIE od filtra/jakości/kodeka zdjęć (żadna
+            // z tamtych zmiennych nie dotyczy ścieżki audio). `isExportable`
+            // to WŁAŚNIE flaga do wykrycia tego PRZED próbą eksportu —
+            // zamiast wysadzać CAŁY film (zdjęcia + wszystko), appka po
+            // cichu pomija samą muzykę i mówi o tym userowi PO udanym
+            // eksporcie reszty (patrz `EditView.performExport`).
+            let isExportable = (try? await audioAsset.load(.isExportable)) ?? false
+            if isExportable,
+               let audioAssetTrack = try await audioAsset.loadTracks(withMediaType: .audio).first,
                let compositionAudioTrack = composition.addMutableTrack(
                    withMediaType: .audio,
                    preferredTrackID: kCMPersistentTrackID_Invalid
@@ -241,13 +316,47 @@ enum VideoComposer {
                 let range = CMTimeRange(start: .zero, duration: min(audioDuration, musicTimelineEnd))
                 try compositionAudioTrack.insertTimeRange(range, of: audioAssetTrack, at: .zero)
                 musicTrack = compositionAudioTrack
+            } else if !isExportable {
+                musicSkippedAsProtected = true
             }
         }
+
+        // 24.08.2026 — POPRAWIONA diagnoza (poprzednia, z 23.08, była
+        // niekompletna). Prawdziwa przyczyna `FigAssetExportSession -16976`,
+        // potwierdzona pełnym zrzutem struktury kompozycji na żywym
+        // urządzeniu: `originalAudioTrackA`/`B` (wyżej) są tworzone
+        // BEZWARUNKOWO, niezależnie czy jakikolwiek item ma własny dźwięk.
+        // Dla projektu z samych zdjęć (bez muzyki) OBIE zostają zupełnie
+        // PUSTE — istnieją jako ścieżki kompozycji, ale z ZEREM segmentów —
+        // i nigdy nie są usuwane. To dokładnie ta anomalia myli prywatny
+        // remaker Apple'a (pusta ścieżka audio bez żadnej treści, nie
+        // "brak ścieżki audio" jak błędnie założono wczoraj — dlatego
+        // wczorajsza poprawka "dodaj ciszę, gdy `tracks(.audio).isEmpty`"
+        // nigdy się nie uruchamiała: `.isEmpty` sprawdzało ISTNIENIE
+        // ścieżek, a te dwie puste ZAWSZE tam były).
+        for track in composition.tracks(withMediaType: .audio) where track.segments.isEmpty {
+            composition.removeTrack(track)
+        }
+        try await ensureAudioTrackExists(in: composition, duration: timelineEnd)
 
         let videoComposition = AVMutableVideoComposition()
         videoComposition.renderSize = canvasSize
         videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
-        var instructions = buildInstructions(placements: placements, transitionDurations: transitionDurations, transitionStyles: transitionStyles, canvasSize: canvasSize, enabledTransitionStyles: enabledTransitionStyles)
+        // 23.08.2026 — realny bug report testerki: eksport kończył się
+        // `AVFoundationErrorDomain -11838` ("The operation is not supported
+        // for this media"). Bez jawnych właściwości koloru AVFoundation
+        // wywnioskowuje je per-klip, a appka MIESZA w jednej kompozycji
+        // ProRes422HQ z `ImageToVideoRenderer`/outro (`PMemoriesOutroCard-
+        // Renderer`) z prawdziwym wideo usera (HEVC, czasem HDR na nowszych
+        // iPhone'ach) — dokładnie znany trigger tego kodu błędu. Wymuszenie
+        // jednej, stałej przestrzeni (SDR Rec.709) na CAŁEJ kompozycji
+        // normalizuje to (tone-mapping HDR→SDR wliczony), zamiast liczyć na
+        // to że eksporter sam dobrze zgadnie wspólny format.
+        videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+        videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
+        videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+        let (builtInstructions, premiumTransitionWindows) = buildInstructions(placements: placements, transitionDurations: transitionDurations, transitionStyles: transitionStyles, canvasSize: canvasSize, enabledTransitionStyles: enabledTransitionStyles)
+        var instructions = builtInstructions
         // Nakładanie nakładek PiP jako OSOBNY przebieg NAD już zbudowanymi
         // instrukcjami — `buildInstructions` (crossfade między głównymi
         // klipami) zostaje całkowicie nietknięte, niższe ryzyko niż wplatanie
@@ -269,7 +378,11 @@ enum VideoComposer {
             musicVolume: Float(musicVolume)
         )
 
-        return ComposedProject(composition: composition, videoComposition: videoComposition, audioMix: audioMix)
+        return ComposedProject(
+            composition: composition, videoComposition: videoComposition, audioMix: audioMix,
+            musicSkippedAsProtected: musicSkippedAsProtected,
+            premiumTransitionWindows: premiumTransitionWindows
+        )
     }
 
     /// Buduje instrukcje renderowania z umieszczonych klipów: dla każdego
@@ -284,8 +397,9 @@ enum VideoComposer {
         transitionStyles: [TransitionStyle?],
         canvasSize: CGSize,
         enabledTransitionStyles: [TransitionStyle] = TransitionStyle.allCases
-    ) -> [AVMutableVideoCompositionInstruction] {
+    ) -> (instructions: [AVMutableVideoCompositionInstruction], premiumWindows: [PremiumTransitionWindow]) {
         var instructions: [AVMutableVideoCompositionInstruction] = []
+        var premiumWindows: [PremiumTransitionWindow] = []
 
         for i in 0..<placements.count {
             let placement = placements[i]
@@ -311,6 +425,9 @@ enum VideoComposer {
             let transitionEnd = placement.start + placement.duration
             let transitionRange = CMTimeRange(start: transitionStart, duration: t)
             let style = transitionStyles[i] ?? TransitionStyle.auto(forTransitionIndex: i, pool: enabledTransitionStyles)
+            if let effect = style.premiumEffect {
+                premiumWindows.append(PremiumTransitionWindow(range: transitionRange, effect: effect))
+            }
 
             let incoming = AVMutableVideoCompositionLayerInstruction(assetTrack: next.track)
             let outgoing = AVMutableVideoCompositionLayerInstruction(assetTrack: placement.track)
@@ -328,7 +445,7 @@ enum VideoComposer {
             instructions.append(instruction)
         }
 
-        return instructions
+        return (instructions, premiumWindows)
     }
 
     /// Ustawia rampy (transform/opacity) na dwóch warstwach przejścia wg
@@ -365,11 +482,34 @@ enum VideoComposer {
         }
 
         switch style {
-        case .crossfade:
+        case .crossfade, .flash, .blurDissolve, .lightLeak, .glitch:
+            // Cztery premium style (`.flash`/`.blurDissolve`/`.lightLeak`/
+            // `.glitch`) dokładają swój właściwy efekt w DRUGIM przebiegu
+            // (`PremiumTransitionGrader`, patrz `TransitionStyle.
+            // premiumEffect`) — tu, w pierwszym przebiegu, dostają dokładnie
+            // tę samą bazę co zwykły crossfade, żeby było na czym ten efekt
+            // nałożyć (spójny obraz zamiast twardego cięcia).
             incoming.setTransform(incomingTransform, at: transitionStart)
             incoming.setOpacityRamp(fromStartOpacity: 0, toEndOpacity: 1, timeRange: transitionRange)
             outgoing.setTransform(outgoingTransform, at: transitionStart)
             outgoing.setOpacityRamp(fromStartOpacity: 1, toEndOpacity: 0, timeRange: transitionRange)
+
+        case .whipPan:
+            // Szybkie, mocno przesadzone przesunięcie + lekkie doskalowanie
+            // "z rozpędu" — ten sam wzorzec co `.slide` (wjazd z krawędzi,
+            // bez opacity), tylko z dodatkowym powiększeniem obu warstw w
+            // szczycie ruchu, żeby sprzedać wrażenie szybkiego machnięcia
+            // kamerą zamiast zwykłego przesunięcia.
+            let overshootIncoming = scaled(
+                incomingTransform.concatenating(CGAffineTransform(translationX: canvasSize.width, y: 0)),
+                x: 1.15, y: 1.15
+            )
+            incoming.setTransformRamp(fromStart: overshootIncoming, toEnd: incomingTransform, timeRange: transitionRange)
+            incoming.setOpacityRamp(fromStartOpacity: 1, toEndOpacity: 1, timeRange: transitionRange)
+            let overshootOutgoing = scaled(outgoingTransform, x: 1.15, y: 1.15)
+                .concatenating(CGAffineTransform(translationX: -canvasSize.width * 0.4, y: 0))
+            outgoing.setTransformRamp(fromStart: outgoingTransform, toEnd: overshootOutgoing, timeRange: transitionRange)
+            outgoing.setOpacityRamp(fromStartOpacity: 1, toEndOpacity: 1, timeRange: transitionRange)
 
         case .slide:
             // "Push": wchodzący klip wjeżdża z prawej krawędzi kanwy na
@@ -555,16 +695,29 @@ enum VideoComposer {
 
     /// Kolejność: realne wideo > wideo z Live Photo (jeśli włączony ruch) >
     /// wyrenderowane zdjęcie statyczne.
-    /// Rozwiązuje źródła wszystkich elementów RÓWNOLEGLE (max 4 naraz —
-    /// "worker pool" przez `TaskGroup`, nie bez limitu), zachowując
-    /// przyporządkowanie po indeksie do dalszego, sekwencyjnego budowania
-    /// kompozycji. Dla wideo/Live Photo to i tak niemal natychmiastowe
-    /// (zwraca istniejący URL), ale dla zdjęć to pełne renderowanie —
-    /// właśnie tu jest realny zysk.
+    /// Rozwiązuje źródła wszystkich elementów RÓWNOLEGLE — "worker pool"
+    /// przez `TaskGroup`, zachowując przyporządkowanie po indeksie do
+    /// dalszego, sekwencyjnego budowania kompozycji. Dla wideo/Live Photo to
+    /// i tak niemal natychmiastowe (zwraca istniejący URL), ale dla zdjęć to
+    /// pełne renderowanie — właśnie tu jest realny zysk.
+    ///
+    /// 23.08.2026 — realny bug report (`-11838`/`-16976`/`FigAssetWriter
+    /// -12785`), zdiagnozowany na żywo przez logi z telefonu: przy
+    /// `maxConcurrent = 4` w logach widać było DOKŁADNIE 4 jednoczesne
+    /// sesje sprzętowego enkodera HEVC (`AVE_Plugin_HEVC_*`), tuż PRZED
+    /// awarią głównego eksportu. Sprzętowe enkodery VideoToolbox mają
+    /// twardy, zależny od chipu limit jednoczesnych sesji — na
+    /// urządzeniach z mniejszym limitem niż 4 (albo obciążonych czymś
+    /// innym w tle) wyczerpanie tej puli podczas równoległego renderowania
+    /// zdjęć zostawia system w stanie, w którym FINALNY `AVAssetExportSession`
+    /// (`VideoExporter.export`, `mainExport`) nie może już uzyskać
+    /// własnej sesji enkodera. Zmniejszone do 1 (sekwencyjnie) —
+    /// wolniejsze przy wielu zdjęciach, ale eliminuje ryzyko wyczerpania
+    /// zasobu enkodera na słabszych/inaczej obciążonych urządzeniach.
     private static func resolveSourceURLs(
         for items: [MediaItem], canvasSize: CGSize, onProgress: ((Double) -> Void)? = nil
     ) async throws -> [Int: URL] {
-        let maxConcurrent = 4
+        let maxConcurrent = 1
         var results: [Int: URL] = [:]
         var completedCount = 0
         let total = items.count
@@ -606,7 +759,18 @@ enum VideoComposer {
             if let cached = await PhotoRenderCache.shared.cachedURL(for: key) {
                 return cached
             }
-            let rendered = try await ImageToVideoRenderer.render(image: thumbnail, duration: item.duration, size: canvasSize)
+            // `item.thumbnail` jest dziś celowo MAŁA (30.08.2026, naprawa
+            // OOM-crashu przy dużych selekcjach) — do faktycznego eksportu
+            // pobieramy świeży obraz w PEŁNEJ rozdzielczości, sekwencyjnie
+            // (`resolveSourceURLs`, `maxConcurrent = 1`), więc bezpiecznie
+            // pamięciowo. Fallback na `thumbnail` tylko gdyby to się nie
+            // udało (np. brak `pickerItemId`) — lepsze niż całkiem pusty film.
+            var sourceImage = thumbnail
+            if let pickerItemId = item.pickerItemId,
+               let fullResolution = await MediaAssetLoader.fullResolutionImage(forAssetLocalIdentifier: pickerItemId) {
+                sourceImage = fullResolution
+            }
+            let rendered = try await ImageToVideoRenderer.render(image: sourceImage, duration: item.duration, size: canvasSize)
             await PhotoRenderCache.shared.store(rendered, for: key)
             return rendered
         }
@@ -635,7 +799,13 @@ enum VideoComposer {
             if let cached = await PhotoRenderCache.shared.cachedURL(for: key) {
                 return cached
             }
-            let rendered = try await ImageToVideoRenderer.render(image: thumbnail, duration: overlay.duration, size: canvasSize)
+            // Ta sama naprawa jakości co `resolveSourceURL` wyżej.
+            var sourceImage = thumbnail
+            if let pickerItemId = overlay.pickerItemId,
+               let fullResolution = await MediaAssetLoader.fullResolutionImage(forAssetLocalIdentifier: pickerItemId) {
+                sourceImage = fullResolution
+            }
+            let rendered = try await ImageToVideoRenderer.render(image: sourceImage, duration: overlay.duration, size: canvasSize)
             await PhotoRenderCache.shared.store(rendered, for: key)
             return rendered
         }

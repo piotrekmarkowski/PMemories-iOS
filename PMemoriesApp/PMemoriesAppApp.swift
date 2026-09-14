@@ -42,6 +42,8 @@ struct PMemoriesAppApp: App {
         return try! ModelContainer(for: schema, configurations: [configuration])
     }()
 
+    @Environment(\.scenePhase) private var scenePhase
+
     init() {
         TempFileCleanup.purgeStaleTemporaryFiles()
     }
@@ -51,5 +53,20 @@ struct PMemoriesAppApp: App {
             HomeView()
         }
         .modelContainer(Self.container)
+        // 30.08.2026, user: "nie chce zeby zawalala telefon jesli ktos z
+        // niej korzysta" — czyszczenie WYŁĄCZNIE przy zimnym starcie
+        // (`init()` wyżej) nie odpala się w ogóle dopóki ktoś nie
+        // force-quituje appki, a większość userów tego nie robi (appka
+        // zwyczajnie wisi w tle). Sprawdzone na żywo na "Pit": 403MB w 303
+        // plikach tymczasowych (głównie cache renderów zdjęć z powtórnych
+        // eksportów, `PhotoRenderCache`) po ok. godzinie testowania w JEDNEJ
+        // ciągłej sesji, bez ani jednego restartu. Dodatkowe czyszczenie przy
+        // KAŻDYM zejściu appki do tła — znacznie częstsza, realna okazja niż
+        // czekanie na pełny restart.
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                TempFileCleanup.purgeStaleTemporaryFiles()
+            }
+        }
     }
 }

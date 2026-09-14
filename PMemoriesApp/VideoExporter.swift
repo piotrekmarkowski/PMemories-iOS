@@ -20,9 +20,20 @@ enum VideoExporter {
     static func export(
         composedProject: VideoComposer.ComposedProject, onProgress: ((Double) -> Void)? = nil
     ) async throws -> URL {
+        // 23.08.2026 — realny bug report (`-11838`/`FigAssetExportSession
+        // -16976`), zdiagnozowany na żywo z logów urządzenia: błąd pada
+        // WEWNĄTRZ prywatnego kodu `FigAssetExportSession` Apple'a, nie w
+        // naszej kompozycji (zakresy czasu są poprawnie ograniczane do
+        // realnej długości źródła, sprawdzone w kodzie). Próba: konkretny
+        // preset HEVC zamiast generycznego "HighestQuality" — różne presety
+        // mogą iść inną wewnętrzną ścieżką negocjacji formatu w tym samym
+        // prywatnym frameworku.
+        let presetName = AVAssetExportSession.allExportPresets().contains(AVAssetExportPresetHEVCHighestQuality)
+            ? AVAssetExportPresetHEVCHighestQuality
+            : AVAssetExportPresetHighestQuality
         guard let exportSession = AVAssetExportSession(
             asset: composedProject.composition,
-            presetName: AVAssetExportPresetHighestQuality
+            presetName: presetName
         ) else {
             throw ExportError.sessionCreationFailed
         }

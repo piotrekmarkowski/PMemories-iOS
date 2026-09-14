@@ -26,8 +26,49 @@ enum TransitionStyle: String, CaseIterable, Identifiable, Codable {
     case rotate
     case squeeze
     case diagonal
+    // Premium (30.08.2026, user: "wprowadz jako premium") — widoczne w
+    // Style jako osobna, zablokowana sekcja (kłódka), appka nie ma jeszcze
+    // płatności, więc na razie NIE da się ich wybrać (patrz `isPremium`),
+    // ale kod/renderowanie stoją gotowe pod przyszły paywall. `.whipPan` to
+    // ta sama technika co powyższe 10 (transform ramp) — reszta to DRUGI,
+    // opcjonalny przebieg CIFilter w oknie przejścia (patrz
+    // `PremiumTransitionEffect`/`PremiumTransitionGrader`), bo efekty typu
+    // rozmycie/glitch/light leak wymagają operacji na pikselach, nie tylko
+    // transformu/przezroczystości — bez otwierania tematu pełnego custom
+    // `AVVideoCompositing` (dalej świadomie odrzucone jako "wszystko albo
+    // nic"), bo ten drugi przebieg działa na JUŻ spłaszczonym, wyrenderowanym
+    // pliku (dokładnie jak `ColorGrader`), nie na żywej kompozycji.
+    case whipPan
+    case flash
+    case blurDissolve
+    case lightLeak
+    case glitch
 
     var id: String { rawValue }
+
+    /// `true` = wymaga przyszłego systemu płatności, dziś widoczne w Style
+    /// ale zablokowane (kłódka) — patrz `StyleView`.
+    var isPremium: Bool {
+        switch self {
+        case .whipPan, .flash, .blurDissolve, .lightLeak, .glitch: return true
+        default: return false
+        }
+    }
+
+    /// `nil` = przejście renderowane WYŁĄCZNIE w pierwszym przebiegu
+    /// (transform/opacity ramp, jak wszystkie pozostałe style) — dotyczy też
+    /// `.whipPan` mimo `isPremium == true`. Pozostałe premium style dokładają
+    /// TEN efekt jako DRUGI przebieg (`PremiumTransitionGrader`) NAD bazowym
+    /// crossfade z pierwszego przebiegu (patrz `VideoComposer.applyTransition`).
+    var premiumEffect: PremiumTransitionEffect? {
+        switch self {
+        case .flash: return .flash
+        case .blurDissolve: return .blurDissolve
+        case .lightLeak: return .lightLeak
+        case .glitch: return .glitch
+        default: return nil
+        }
+    }
 
     var label: String {
         switch self {
@@ -44,6 +85,11 @@ enum TransitionStyle: String, CaseIterable, Identifiable, Codable {
         case .rotate: return L("Rotate")
         case .squeeze: return L("Squeeze")
         case .diagonal: return L("Diagonal")
+        case .whipPan: return L("Whip Pan")
+        case .flash: return L("Flash")
+        case .blurDissolve: return L("Blur Dissolve")
+        case .lightLeak: return L("Light Leak")
+        case .glitch: return L("Glitch")
         }
     }
 
@@ -58,7 +104,7 @@ enum TransitionStyle: String, CaseIterable, Identifiable, Codable {
     /// `pool` (np. wszystko odznaczone przez pomyłkę) ma bezpieczny fallback
     /// na pełną pulę, żeby eksport nigdy nie ubił się brakiem stylu.
     static func auto(forTransitionIndex index: Int, pool: [TransitionStyle] = allCases) -> TransitionStyle {
-        let safePool = pool.isEmpty ? allCases : pool
+        let safePool = pool.isEmpty ? allCases.filter { !$0.isPremium } : pool
         return safePool[index % safePool.count]
     }
 }

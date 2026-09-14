@@ -3,6 +3,15 @@ import MapKit
 import SwiftData
 import PhotosUI
 
+/// Który widok pokazuje `TravelMapView` pod segmented control na górze
+/// ekranu (21.08.2026) — zastąpiło pojedynczą, małą ikonkę "globe.desk" w
+/// toolbarze, którą user zgłosił jako wyglądającą na ukrytą/przypadkową
+/// funkcję. Teraz oba widoki są równorzędnymi, nazwanymi zakładkami.
+private enum TravelSegment: Hashable {
+    case map
+    case globe
+}
+
 /// Ekran budowy trasy podróży — user wpisuje miasta (z podpowiedziami miast
 /// i lotnisk) i środek transportu między nimi, appka geokoduje i pokazuje
 /// animowaną trasę na globusie. Udane trasy zapisywane trwale (`SavedTrip`,
@@ -18,19 +27,11 @@ struct TravelMapView: View {
     /// "Your Journey") — deep-link prosto do World Globe, z pominięciem
     /// głównego ekranu Travel Map. Ten sam wzorzec co `pendingLibraryHighlightIDs`.
     @Binding var pendingShowWorldGlobe: Bool
-    /// Ustawiane z Trip Planning ("Convert Trip → Memory", 11.08.2026) —
-    /// szkic trasy zbudowany z `PlannedTrip.asTripStops`, żeby user od razu
-    /// widział gotowe przystanki zamiast wpisywać wszystko od nowa. Ten sam
-    /// wzorzec co `pendingShowWorldGlobe` — jednorazowo skonsumowane w
-    /// `init` (przez `_stops`), potem czyszczone w `.onAppear`, żeby
-    /// zwykłe przejście na tę zakładkę później nie podchwyciło nieaktualnego
-    /// szkicu.
-    @Binding var pendingPrefillStops: [TripStop]?
-
     @State private var stops: [TripStop] = [TripStop(), TripStop()]
     @State private var isDetectingPeakForNewStop = false
     @State private var peakAddError: String?
-    @State private var isShowingWorldGlobe = false
+    @State private var isShowingPeakSearch = false
+    @State private var travelSegment: TravelSegment = .map
     @State private var isShowingAchievements = false
     @State private var linkingStopID: UUID?
     @State private var isShowingCancelConfirm = false
@@ -68,22 +69,16 @@ struct TravelMapView: View {
 
     init(
         selectedTab: Binding<MainTab>, pendingLibraryHighlightIDs: Binding<[UUID]>,
-        pendingShowWorldGlobe: Binding<Bool>, pendingPrefillStops: Binding<[TripStop]?>
+        pendingShowWorldGlobe: Binding<Bool>
     ) {
         self._selectedTab = selectedTab
         self._pendingLibraryHighlightIDs = pendingLibraryHighlightIDs
         self._pendingShowWorldGlobe = pendingShowWorldGlobe
-        self._pendingPrefillStops = pendingPrefillStops
-        self._stops = State(initialValue: pendingPrefillStops.wrappedValue ?? [TripStop(), TripStop()])
     }
 
     var body: some View {
         NavigationStack {
             navigationContent
-        }
-        .onAppear {
-            guard pendingPrefillStops != nil else { return }
-            pendingPrefillStops = nil
         }
     }
 
@@ -93,11 +88,23 @@ struct TravelMapView: View {
     /// urósł zbyt duży po kolejnym `.navigationDestination`/toolbar
     /// przycisku). Rozwiązanie to samo: rozbicie na osobną właściwość.
     private var navigationContent: some View {
-        stopsList
-            // `List` maluje własne, nieprzezroczyste tło systemowe — bez
-            // ukrycia go skórka zakładki (`.tabSkinBackground()`) byłaby
-            // całkowicie zasłonięta (02.08.2026, skórki tła zakładek).
-            .scrollContentBackground(.hidden)
+        VStack(spacing: 0) {
+            travelSegmentHeader
+            Group {
+                switch travelSegment {
+                case .map:
+                    // `List` maluje własne, nieprzezroczyste tło systemowe —
+                    // bez ukrycia go skórka zakładki (`.tabSkinBackground()`)
+                    // byłaby całkowicie zasłonięta (02.08.2026, skórki tła
+                    // zakładek).
+                    stopsList
+                        .scrollContentBackground(.hidden)
+                case .globe:
+                    WorldGlobeView(isPresented: worldGlobePresentedBinding, selectedTab: $selectedTab, pendingLibraryHighlightIDs: $pendingLibraryHighlightIDs)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
             .tabSkinBackground()
             // BUG znaleziony 02.08.2026 (user: "'Travel Map' jest dalej
             // czarne") — `.toolbarColorScheme(_:for: .navigationBar)`
@@ -113,13 +120,10 @@ struct TravelMapView: View {
             .onAppear {
                 guard pendingShowWorldGlobe else { return }
                 pendingShowWorldGlobe = false
-                isShowingWorldGlobe = true
+                travelSegment = .globe
             }
             .navigationDestination(isPresented: $isShowingAnimation) {
                 TravelMapAnimationView(stops: resolvedStops, speedMultiplier: speedMultiplier, mapTheme: mapTheme)
-            }
-            .navigationDestination(isPresented: $isShowingWorldGlobe) {
-                WorldGlobeView(isPresented: $isShowingWorldGlobe, selectedTab: $selectedTab, pendingLibraryHighlightIDs: $pendingLibraryHighlightIDs)
             }
             .navigationDestination(isPresented: $isShowingAchievements) {
                 AchievementsView(onEditTrip: { trip in
@@ -157,6 +161,17 @@ struct TravelMapView: View {
                     set: { if !$0 { linkingStopID = nil } }
                 )) {
                     linkProjectSheet
+                }
+                .sheet(isPresented: $isShowingPeakSearch) {
+                    PeakSearchView { peak in
+                        var stop = TripStop()
+                        stop.cityName = peak.name
+                        stop.coordinate = peak.coordinate
+                        stop.country = peak.country
+                        stop.countryCode = peak.countryCode
+                        stops.append(stop)
+                        MapTilePrefetcher.prefetch(coordinate: peak.coordinate)
+                    }
                 }
                 .alert("Couldn't find all cities", isPresented: .init(
                     get: { resolveError != nil },
@@ -200,6 +215,41 @@ struct TravelMapView: View {
                 }
     }
 
+    /// `WorldGlobeView.isPresented` wciąż oczekuje `Binding<Bool>` (ustawia
+    /// `false` samo, po skoku do Library — patrz komentarz w
+    /// `WorldGlobeView.swift`) — ten computed binding tłumaczy to na nasz
+    /// `travelSegment`, więc `WorldGlobeView` w ogóle nie musiało się
+    /// zmienić przy przejściu z pushowanego ekranu na zakładkę w miejscu.
+    private var worldGlobePresentedBinding: Binding<Bool> {
+        Binding(
+            get: { travelSegment == .globe },
+            set: { travelSegment = $0 ? .globe : .map }
+        )
+    }
+
+    /// Segmented control Map/Globe (21.08.2026) — zastąpiło małą ikonkę
+    /// "globe.desk" w toolbarze, którą user zgłosił jako wyglądającą na
+    /// ukrytą/przypadkową funkcję. Ten sam tytuł "Travel Map" co dawniej
+    /// pierwszy wiersz `stopsList`, teraz wspólny nagłówek nad obiema
+    /// zakładkami (nie tylko nad listą przystanków).
+    private var travelSegmentHeader: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Travel Map")
+                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .skinAwareHeading()
+
+            Picker("", selection: $travelSegment) {
+                Text(L("Map")).tag(TravelSegment.map)
+                Text(L("Globe")).tag(TravelSegment.globe)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
     // BUG znaleziony 04.08.2026 (user: "czasem jak wracam z library do
     // travel nie widzę ikonki globu i pucharu, ale nie zawsze tak się
     // dzieje") — `TravelMapView` jest tworzony OD NOWA za każdym
@@ -207,9 +257,10 @@ struct TravelMapView: View {
     // selectedTab`, nie jako trwały `TabView`), a `if !savedTrips.isEmpty`
     // na świeżo utworzonym `@Query` bywa niedeterministycznie puste przez
     // jedną klatkę zanim zapytanie realnie się doładuje — stąd sporadyczne
-    // migotanie. Oba ekrany docelowe (Achievements/World Globe) już mają
-    // własne stany "brak podróży", więc bramkowanie tu było zbędne — teraz
-    // przyciski są zawsze widoczne, zero wyścigu.
+    // migotanie. Ekran Achievements już ma własny stan "brak podróży", więc
+    // bramkowanie tu było zbędne — przycisk jest zawsze widoczny, zero
+    // wyścigu. (Ikonka globusa USUNIĘTA stąd 21.08.2026 — zastąpiona
+    // segmented control w `travelSegmentHeader`.)
     @ToolbarContentBuilder
     private var travelMapToolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
@@ -217,13 +268,6 @@ struct TravelMapView: View {
                 isShowingAchievements = true
             } label: {
                 Image(systemName: "trophy")
-            }
-        }
-        ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                isShowingWorldGlobe = true
-            } label: {
-                Image(systemName: "globe.desk")
             }
         }
     }
@@ -238,16 +282,9 @@ struct TravelMapView: View {
     /// `body` to standardowy sposób obejścia tego ograniczenia.
     private var stopsList: some View {
         List {
-            Text("Travel Map")
-                // Zmniejszone z 34→26pt (11.08.2026, user: "napis mapa
-                // podróży jest trochę za duży") — ten sam duch co
-                // zmniejszenie powitania na Home 30.07.2026 (28→22pt).
-                .font(.system(size: 26, weight: .bold, design: .rounded))
-                .skinAwareHeading()
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
-
+            // Tytuł "Travel Map" przeniesiony do `travelSegmentHeader`
+            // (21.08.2026, wspólny nagłówek nad Map/Globe) — tu był
+            // wcześniej pierwszy wiersz tej listy.
             if let editingTripID, savedTrips.contains(where: { $0.id == editingTripID }) {
                 Section {
                     EditingBanner(
@@ -271,7 +308,13 @@ struct TravelMapView: View {
                 // Przeciąganie identyfikuje wiersze przez `stop.id.uuidString`,
                 // nie przez pozycję w tablicy.
                 ForEach($stops) { $stop in
-                    StopRow(stop: $stop, isFirst: stops.first?.id == stop.id, onLinkTapped: { linkingStopID = stop.id })
+                    StopRow(
+                        stop: $stop, isFirst: stops.first?.id == stop.id,
+                        previousStopCoordinate: stops.firstIndex(where: { $0.id == stop.id }).flatMap { index in
+                            index > 0 ? stops[index - 1].coordinate : nil
+                        },
+                        onLinkTapped: { linkingStopID = stop.id }
+                    )
                         .draggable(stop.id.uuidString)
                         .dropDestination(for: String.self) { droppedIDs, _ in
                             handleStopDrop(droppedIDs, ontoStopID: stop.id)
@@ -282,7 +325,7 @@ struct TravelMapView: View {
                 }
             } footer: {
                 Text("Enter cities in the order you visited them (airports work too). For each next stop, choose how you got there. Press and drag to reorder.")
-                    .foregroundStyle(AppSkin.isAnySkinActive ? .white.opacity(0.85) : .secondary)
+                    .foregroundStyle(AppSkin.skinAwareTextColor(opacity: 0.85))
             }
 
             Section {
@@ -316,6 +359,19 @@ struct TravelMapView: View {
                     }
                 }
                 .disabled(isDetectingPeakForNewStop)
+                // 09.09.2026, user: "nie mozna wybrac na liscie szczytow
+                // jesli sie chodzi po gorach... dzien pozniej sie chce
+                // stworzyc mape albo po wyprawie nie mozna wybrac gdzie sie
+                // bylo" — przycisk wyżej działa TYLKO stojąc na szczycie
+                // (żywe GPS), więc dobudowanie trasy później/z domu było
+                // niemożliwe. Wyszukiwanie PO NAZWIE w tym samym źródle
+                // danych (OSM/Overpass, `PeakDetector.searchPeaks`) nie
+                // wymaga bycia tam fizycznie.
+                Button {
+                    isShowingPeakSearch = true
+                } label: {
+                    Label("Search for a peak", systemImage: "magnifyingglass")
+                }
             }
 
             // Kolejność sekcji: Add at start/end → Show Route → Detect route
@@ -348,7 +404,7 @@ struct TravelMapView: View {
                 .disabled(isDetectingSmartRoute)
             } footer: {
                 Text("The app detects places and order from your photos' location and date — review and adjust the result before saving.")
-                    .foregroundStyle(AppSkin.isAnySkinActive ? .white.opacity(0.85) : .secondary)
+                    .foregroundStyle(AppSkin.skinAwareTextColor(opacity: 0.85))
             }
 
             Section {
@@ -358,10 +414,10 @@ struct TravelMapView: View {
                     Image(systemName: "tortoise")
                 }
                 Text(String(format: "%.1fx", speedMultiplier))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppSkin.skinAwareTextColor())
             } header: {
                 Text(L("Animation Speed"))
-                    .foregroundStyle(AppSkin.isAnySkinActive ? .white : .secondary)
+                    .foregroundStyle(AppSkin.skinAwareTextColor())
             }
 
             Section {
@@ -374,7 +430,7 @@ struct TravelMapView: View {
                 .labelsHidden()
             } header: {
                 Text(L("Map Theme"))
-                    .foregroundStyle(AppSkin.isAnySkinActive ? .white : .secondary)
+                    .foregroundStyle(AppSkin.skinAwareTextColor())
             }
         }
     }
@@ -573,7 +629,8 @@ struct TravelMapView: View {
                 transportRawValue: stop.transport.rawValue, order: index,
                 arrivalDate: stop.arrivalDate, legDistanceKm: legDistanceKm,
                 elevationGainMeters: elevationGainMeters, highestElevationMeters: highestElevationMeters,
-                representativePhotoIdentifier: stop.representativePhotoIdentifier, linkedProjectID: stop.linkedProjectID
+                representativePhotoIdentifier: stop.representativePhotoIdentifier, linkedProjectID: stop.linkedProjectID,
+                administrativeArea: stop.administrativeArea
             ))
         }
 
@@ -702,6 +759,10 @@ private struct BuildRouteButton: View {
 private struct StopRow: View {
     @Binding var stop: TripStop
     let isFirst: Bool
+    /// Współrzędna POPRZEDNIEGO przystanku (jeśli już rozwiązana) — przekazana
+    /// z rodzica, żeby wyszukiwarka miast preferowała miejsca blisko trasy
+    /// zamiast trafień z całego świata (patrz `CitySearchCompleter.biasRegion`).
+    let previousStopCoordinate: CLLocationCoordinate2D?
     /// Wywoływane po tapnięciu ikony filmu — otwieranie pickera trzyma
     /// RODZIC (`TravelMapView`, jeden wspólny `.sheet` na poziomie całego
     /// ekranu), nie ten wiersz. 30.07.2026: sheet prezentowany bezpośrednio
@@ -723,11 +784,23 @@ private struct StopRow: View {
             HStack(spacing: 8) {
                 TextField(isFirst ? L("Starting city") : L("Next city"), text: $stop.cityName)
                     .focused($isFocused)
+                    // 03.09.2026, user: wpisywał "Antalya", pole cichо
+                    // zamieniało się na "Alanya" (inne, prawdziwe miasto w tym
+                    // samym regionie) — iOS autokorekta podmieniała nietypową
+                    // nazwę na bliższe słowo ze słownika. Nazwy miejsc nie
+                    // powinny być korygowane.
+                    .autocorrectionDisabled()
                     .onChange(of: stop.cityName) { _, newValue in
                         guard !isApplyingSuggestion else { return }
                         stop.coordinate = nil // zmiana tekstu ręcznie unieważnia wcześniej wybraną podpowiedź
+                        // `CLLocationCoordinate2D` nie jest `Equatable` w tym
+                        // SDK, więc region odświeżany PRZY KAŻDYM wpisywaniu
+                        // (tanie — samo ustawienie pola, żadnego zapytania) —
+                        // zamiast `.onChange(of: previousStopCoordinate)`.
+                        completer.biasRegion(near: previousStopCoordinate)
                         completer.updateQuery(newValue)
                     }
+                    .onAppear { completer.biasRegion(near: previousStopCoordinate) }
 
                 // Miniaturka na markerze mapy — ręczne przypisanie/zmiana
                 // zdjęcia dla przystanków spoza Smart Route (tam wypełnia się
@@ -863,19 +936,38 @@ private struct StopRow: View {
 
     private func select(_ suggestion: MKLocalSearchCompletion) {
         isApplyingSuggestion = true
-        stop.cityName = suggestion.title
+        let originalTitle = suggestion.title
+        stop.cityName = originalTitle
         isFocused = false
         completer.clear()
         Task {
-            if let (coordinate, country, countryCode, localizedCityName) = await CitySearchCompleter.resolve(suggestion) {
+            if let (coordinate, country, countryCode, localizedCityName, administrativeArea) = await CitySearchCompleter.resolve(suggestion) {
                 stop.coordinate = coordinate
                 stop.country = country
                 stop.countryCode = countryCode
+                stop.administrativeArea = administrativeArea
                 // Nadpisuje surowy tytuł podpowiedzi (w języku REGIONU
                 // telefonu) nazwą w JĘZYKU APPKI, gdy geokodowanie się
-                // powiedzie — patrz `CitySearchCompleter.resolve`.
+                // powiedzie — patrz `CitySearchCompleter.resolve`. Bug
+                // znaleziony 03.09.2026 (user: wybrał "Ibiza" jako 4. przystanek,
+                // appka po chwili po cichu podmieniła to na "Sant Antoni de
+                // Portmany", nazwę SĄSIEDNIEGO przystanku) — dla szerszych
+                // podpowiedzi typu region/miasto (nie POI/lotnisko, to już
+                // było chronione) reverse-geokodowanie WSPÓŁRZĘDNEJ potrafi
+                // zwrócić `locality` NAJBLIŻSZEJ miejscowości, nie tego
+                // samego miejsca w innym języku — ten sam mechanizm co
+                // wcześniejszy bug "Gatwick Airport" → "Gatwick", tylko bez
+                // dotychczasowej ochrony dla nie-POI. Nadpisanie tylko gdy
+                // nowa nazwa DZIELI początek z oryginałem (prawdziwe
+                // tłumaczenie tej samej nazwy, np. "Londyn"/"London") —
+                // inaczej to inne miejsce, zostaw wybór usera bez zmian.
                 if let localizedCityName, !localizedCityName.isEmpty {
-                    stop.cityName = localizedCityName
+                    let a = localizedCityName.lowercased()
+                    let b = originalTitle.lowercased()
+                    let prefixLength = min(3, min(a.count, b.count))
+                    if prefixLength > 0 && a.prefix(prefixLength) == b.prefix(prefixLength) {
+                        stop.cityName = localizedCityName
+                    }
                 }
                 // Ściągnij kafelki dla tego miejsca W TLE od razu, zamiast
                 // czekać aż user faktycznie odtworzy animację — user
@@ -891,6 +983,6 @@ private struct StopRow: View {
 #Preview {
     TravelMapView(
         selectedTab: .constant(.travel), pendingLibraryHighlightIDs: .constant([]),
-        pendingShowWorldGlobe: .constant(false), pendingPrefillStops: .constant(nil)
+        pendingShowWorldGlobe: .constant(false)
     )
 }

@@ -81,7 +81,10 @@ struct PhotoDurationView: View {
                         transitionButton(label: L("Auto"), isSelected: item.transitionStyle == nil) {
                             item.transitionStyle = nil
                         }
-                        ForEach(TransitionStyle.allCases) { style in
+                        // Premium style pominięte dla zwykłych userów, ale
+                        // nie dla Foundera — patrz ten sam komentarz w
+                        // `TrimView.transitionPicker`.
+                        ForEach(TransitionStyle.allCases.filter { !$0.isPremium || TesterRegistry.hasPremiumUnlocked(AuthManager.shared.userIdentifier) }) { style in
                             transitionButton(label: style.label, isSelected: item.transitionStyle == style) {
                                 item.transitionStyle = style
                             }

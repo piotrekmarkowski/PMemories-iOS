@@ -29,6 +29,27 @@ struct ProfileView: View {
     // afternoon, Piotr") — inicjał musi pochodzić z faktycznie
     // zalogowanego usera, nie z developera appki.
     @StateObject private var auth = AuthManager.shared
+    /// Ramka awatara wybrana przez usera (28-30.08.2026, `AvatarFrame`) —
+    /// WŁASNY WYBÓR MA PIERWSZEŃSTWO nad odznaką Foundera/Testera (30.08.2026,
+    /// user: "moja funder jest tylko jedna ale jak bede mial ochote miec
+    /// inna to chce tez to zrobic" — zmiana z poprzedniej zasady, gdzie
+    /// Founder/Tester mieli sztywno narzucony wygląd bez możliwości
+    /// wyboru). Korona/fiolka zostają tylko DOMYŚLNE — pokazują się
+    /// dopiero gdy `selectedAvatarFrame == .none`, patrz przełącznik niżej.
+    @AppStorage("selectedAvatarFrame") private var selectedAvatarFrameRawValue: String = AvatarFrame.none.rawValue
+    /// "AI Director" (30.08.2026) — user: "w apce bedziemy miec mozliwosc z
+    /// AI albo bez do wyboru przez uzytkownika". Domyślnie włączone; wyłączenie
+    /// tu chowa pole tekstowe w `AIDirectorView` (zostają tylko presety) i
+    /// wpływa na `AIDirectorEngine.availability` wszędzie w appce, nie tylko
+    /// w edytorze.
+    @AppStorage(AIDirectorEngine.aiEnabledKey) private var aiFeaturesEnabled: Bool = true
+
+    private var selectedAvatarFrame: AvatarFrame {
+        AvatarFrame(rawValue: selectedAvatarFrameRawValue) ?? .none
+    }
+
+    private static let founderIconName = "crown.fill"
+    private static let testerIconName = "testtube.2"
 
     var body: some View {
         NavigationStack {
@@ -37,14 +58,12 @@ struct ProfileView: View {
                     HStack {
                         Spacer()
                         VStack(spacing: 10) {
-                            ZStack(alignment: .bottomTrailing) {
-                                Group {
-                                    if let avatarImage {
+                            Group {
+                                if let avatarImage {
                                         Image(uiImage: avatarImage)
                                             .resizable()
                                             .aspectRatio(contentMode: .fill)
-                                            .frame(width: 84, height: 84)
-                                            .clipShape(Circle())
+                                            .avatarFramedPhoto(selectedAvatarFrame, size: 84)
                                     } else if let initial = auth.displayName?.first {
                                         Text(String(initial))
                                             .font(.system(size: 32, weight: .bold, design: .rounded))
@@ -59,28 +78,39 @@ struct ProfileView: View {
                                             .background(Palette.heroGradient, in: Circle())
                                     }
                                 }
-                                // Odznaka testera (TODO.md 08.08.2026) —
-                                // `TesterRegistry`, ręcznie utrzymywana
-                                // lista Sign in with Apple identyfikatorów,
-                                // appka nie ma innego źródła "kto testuje".
+                                // Odznaka wybranej ramki/testera/foundera
+                                // (TODO.md 08.08.2026, priorytet odwrócony
+                                // 30.08.2026 — patrz komentarz przy
+                                // `selectedAvatarFrameRawValue`): WŁASNY
+                                // wybór usera wygrywa zawsze gdy != .none;
+                                // korona/fiolka Foundera/Testera to tylko
+                                // domyślny wygląd, dopóki user niczego nie
+                                // wybrał.
                                 .overlay {
-                                    if TesterRegistry.isTester(auth.userIdentifier) {
-                                        Circle().stroke(Palette.heroGradient, lineWidth: 3)
+                                    if selectedAvatarFrame != .none {
+                                        AvatarFrameBadge(frame: selectedAvatarFrame, avatarSize: 84)
+                                    } else {
+                                        switch TesterRegistry.badge(for: auth.userIdentifier) {
+                                        case .founder:
+                                            AvatarFrameOverlay(color: Palette.founderAccent, iconName: Self.founderIconName, avatarSize: 84)
+                                        case .tester:
+                                            AvatarFrameOverlay(color: Palette.testerAccent, iconName: Self.testerIconName, avatarSize: 84)
+                                        case .none:
+                                            EmptyView()
+                                        }
                                     }
                                 }
-                                if TesterRegistry.isTester(auth.userIdentifier) {
-                                    Image(systemName: "star.circle.fill")
-                                        .font(.system(size: 22))
-                                        .foregroundStyle(.white, Palette.purple)
-                                        .background(Circle().fill(.white))
-                                        .offset(x: -26, y: 4)
-                                }
-                                PhotosPicker(selection: $avatarSelection, matching: .images) {
-                                    Image(systemName: "camera.circle.fill")
-                                        .font(.system(size: 26))
-                                        .foregroundStyle(.white, Palette.blue)
-                                        .background(Circle().fill(.white))
-                                }
+                            // Zmiana zdjęcia przeniesiona z pływającej
+                            // ikonki aparatu w rogu awatara na zwykły
+                            // przycisk tekstowy (29.08.2026, bug znaleziony
+                            // na żywo: kamera i odznaka ramki lądowały w
+                            // TYM SAMYM rogu, kamera (rysowana później)
+                            // całkowicie zasłaniała koronę/fiolkę/ikonę
+                            // ramki). Róg awatara należy teraz wyłącznie do
+                            // odznaki.
+                            PhotosPicker(selection: $avatarSelection, matching: .images) {
+                                Text(avatarImage == nil ? L("Add Photo") : L("Change Photo"))
+                                    .font(.caption)
                             }
                             if avatarImage != nil {
                                 Button(role: .destructive) {
@@ -135,6 +165,25 @@ struct ProfileView: View {
                     Text("Language")
                 } footer: {
                     Text("Defaults to your phone's language. Changing this closes the app — reopen it to see the new language.")
+                }
+
+                Section {
+                    Toggle(L("AI Features"), isOn: $aiFeaturesEnabled)
+                } footer: {
+                    Text(L("Lets PMemories suggest an editing style (music mood, filter, transitions) from a short description you type. Runs entirely on your device — nothing is sent anywhere. Turn off to use manual presets only."))
+                }
+
+                // Avatar Frame NAD Templates (30.08.2026, user: "ramki
+                // powinny byc nad tameplates") — teraz zwykły wiersz
+                // `NavigationLink` zamiast modalnego `.sheet`, widoczny dla
+                // WSZYSTKICH (w tym Foundera/Testera — patrz odwrócony
+                // priorytet przy `selectedAvatarFrameRawValue` wyżej).
+                Section {
+                    NavigationLink {
+                        AvatarFrameView(avatarImage: avatarImage)
+                    } label: {
+                        Label(L("Avatar Frame"), systemImage: "seal")
+                    }
                 }
 
                 // Templates przeniesione tu z dolnego paska (11.08.2026) —
