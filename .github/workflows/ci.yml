@@ -60,9 +60,26 @@ jobs:
           echo "Picked simulator UDID: $UDID"
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
 
-      - name: Build & Test
+      # Rozbite na dwa kroki (nie jedno `xcodebuild test`) — pierwsza próba
+      # na runnerze GitHuba (Xcode 16.4, inny niż lokalny 26.6) padła z
+      # myloącym "type 'TravelAchievementsCalculator' has no member
+      # 'countryGroupingCode'", mimo że appka i testy osobno budują się bez
+      # problemu — wyścig w harmonogramowaniu buildu, gdzie kompilacja testu
+      # startowała zanim moduł appki (`@testable import PMemories`) zdążył
+      # się w pełni wyemitować. `build-for-testing`/`test-without-building`
+      # to standardowy, niezawodny wzorzec CI właśnie na tego typu wyścigi —
+      # pierwszy krok kończy KOMPLETNIE cały build (appkę + testy) zanim
+      # cokolwiek zacznie się uruchamiać.
+      - name: Build for Testing
         run: |
-          xcodebuild test \
+          xcodebuild build-for-testing \
+            -project PMemoriesApp.xcodeproj \
+            -scheme PMemoriesApp \
+            -destination "id=${{ steps.simulator.outputs.udid }}"
+
+      - name: Run Tests
+        run: |
+          xcodebuild test-without-building \
             -project PMemoriesApp.xcodeproj \
             -scheme PMemoriesApp \
             -destination "id=${{ steps.simulator.outputs.udid }}"
