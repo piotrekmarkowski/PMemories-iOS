@@ -138,6 +138,13 @@ jobs:
       # `printf` z `%s` trzyma wszystko w jednej, poprawnie wciętej linii i
       # bezpiecznie wstawia treść commita (może zawierać cudzysłowy/znaki
       # specjalne) bez ryzyka złamania cudzysłowów.
+      #
+      # `github.head_ref || github.ref_name` — dla eventów `pull_request`
+      # `ref_name` to wewnętrzna referencja scalania GitHuba ("2/merge"), nie
+      # prawdziwa nazwa gałęzi — złapane na żywo (user dostał "Gałąź:
+      # 2/merge" na Telegramie). `head_ref` istnieje tylko dla PR-ów i
+      # zawiera prawdziwą nazwę gałęzi źródłowej; dla push/schedule jest
+      # puste, więc `|| ref_name` wtedy poprawnie wraca do zwykłej gałęzi.
       - name: Notify Telegram on failure
         if: failure()
         run: |
@@ -145,7 +152,7 @@ jobs:
           if [ -z "$ERRORS" ]; then ERRORS="(zobacz pełny log pod linkiem niżej)"; fi
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title || 'Codzienne sprawdzenie (harmonogram)' }}"
-          MESSAGE=$(printf '❌ PMemories CI FAILED\nGałąź: %s\nCommit: %s\n\nBłędy:\n%s\n\n%s' "${{ github.ref_name }}" "$COMMIT_MSG" "$ERRORS" "$RUN_URL")
+          MESSAGE=$(printf '❌ PMemories CI FAILED\nGałąź: %s\nCommit: %s\n\nBłędy:\n%s\n\n%s' "${{ github.head_ref || github.ref_name }}" "$COMMIT_MSG" "$ERRORS" "$RUN_URL")
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=${MESSAGE}" > /dev/null
@@ -154,7 +161,7 @@ jobs:
         if: success()
         run: |
           COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title || 'Codzienne sprawdzenie (harmonogram)' }}"
-          MESSAGE=$(printf '✅ PMemories CI passed\nGałąź: %s\nCommit: %s' "${{ github.ref_name }}" "$COMMIT_MSG")
+          MESSAGE=$(printf '✅ PMemories CI passed\nGałąź: %s\nCommit: %s' "${{ github.head_ref || github.ref_name }}" "$COMMIT_MSG")
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=${MESSAGE}" > /dev/null
