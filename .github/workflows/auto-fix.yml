@@ -1,0 +1,104 @@
+name: Auto-fix (Claude Code)
+
+# 14.09.2026 — odpalane RĘCZNIE (przyciskiem "🔧 Napraw" pod wiadomością
+# błędu na Telegramie, patrz `telegram-bot/` na VPS), NIGDY automatycznie
+# po samym fail CI. User: "chcę mieć nad tym kontrolę... żeby mi wykrywał
+# błędy i naprawiał, i żebym dostawał info na Telegram co było błędem i czy
+# naprawione" — to jest ta druga część: Claude Code SAM analizuje log i
+# proponuje poprawkę, ale ZAWSZE jako PR do przejrzenia, NIGDY auto-merge.
+# Klucz: `CLAUDE_CODE_OAUTH_TOKEN` (subskrypcja Pro/Max usera przez
+# `claude setup-token`), nie osobny płatny klucz API — zero dodatkowego
+# konta/billingu ponad to co user już ma.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'ID nieudanego runu CI do przeanalizowania'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch failure log
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run view "${{ github.event.inputs.run_id }}" --log-failed > failure.log 2>&1 || echo "(nie udało się pobrać logu)" > failure.log
+
+      - name: Create fix branch
+        run: |
+          git config user.name "Claude (auto-fix)"
+          git config user.email "noreply@anthropic.com"
+          git checkout -b "auto-fix/run-${{ github.event.inputs.run_id }}"
+
+      # Claude czyta `failure.log` sam (przez własne narzędzie Read) zamiast
+      # wklejania całej treści logu w string YAML — dokładnie ten sam
+      # problem z wieloliniowymi stringami w `run: |` co przy powiadomieniach
+      # Telegram (patrz `ci.yml`) omijamy w ten sposób całkowicie.
+      - name: Run Claude Code to analyze and fix
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Przeanalizuj plik `failure.log` w katalogu repo — to log nieudanego
+            runu CI (GitHub Actions run #${{ github.event.inputs.run_id }}) dla
+            appki iOS PMemories (SwiftUI/SwiftData, XcodeGen).
+
+            Znajdź RZECZYWISTĄ przyczynę błędu w kodzie źródłowym i napraw ją
+            minimalnie i precyzyjnie — nie rób refaktoryzacji niezwiązanych
+            fragmentów, nie zmieniaj stylu kodu w miejscach, których błąd nie
+            dotyczy. Jeśli po dodaniu/zmianie plików `.swift` trzeba
+            zaktualizować `project.yml` lub odpalić `xcodegen generate`, zrób to.
+
+            Jeśli NIE jesteś w stanie znaleźć/naprawić przyczyny z samego
+            logu, jasno to napisz zamiast zgadywać losową zmianę.
+          claude_args: "--max-turns 15 --allowedTools Read,Edit,Write,Bash,Grep,Glob"
+
+      - name: Commit fix (if any)
+        id: commit
+        run: |
+          rm -f failure.log
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git add -A
+            git commit -m "🤖 Auto-fix: CI run #${{ github.event.inputs.run_id }}"
+            git push -u origin "auto-fix/run-${{ github.event.inputs.run_id }}"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open PR
+        id: pr
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          URL=$(gh pr create \
+            --title "🤖 Auto-fix: CI run #${{ github.event.inputs.run_id }}" \
+            --body "Automatyczna próba naprawy błędu z CI run #${{ github.event.inputs.run_id }}, wygenerowana przez Claude Code. **Przejrzyj przed scaleniem — nic nie jest tu mergowane automatycznie.**" \
+            --base main --head "auto-fix/run-${{ github.event.inputs.run_id }}")
+          echo "pr_url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Telegram
+        if: always()
+        run: |
+          if [ "${{ steps.commit.outputs.changed }}" = "true" ]; then
+            MESSAGE=$(printf '🔧 Auto-fix gotowy do przejrzenia\n\n%s' "${{ steps.pr.outputs.pr_url }}")
+          else
+            MESSAGE=$(printf '🤷 Claude nie znalazł/nie naprawił błędu z runu #%s automatycznie — potrzebna ręczna analiza.' "${{ github.event.inputs.run_id }}")
+          fi
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=${MESSAGE}" > /dev/null

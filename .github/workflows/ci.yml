@@ -153,9 +153,16 @@ jobs:
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           COMMIT_MSG="${{ github.event.head_commit.message || github.event.pull_request.title || 'Codzienne sprawdzenie (harmonogram)' }}"
           MESSAGE=$(printf '❌ PMemories CI FAILED\nGałąź: %s\nCommit: %s\n\nBłędy:\n%s\n\n%s' "${{ github.head_ref || github.ref_name }}" "$COMMIT_MSG" "$ERRORS" "$RUN_URL")
+          # Przycisk "🔧 Napraw" — callback_data niesie run_id, żeby listener
+          # na VPS (`telegram-bot/`) wiedział KTÓRY run przekazać dalej do
+          # `auto-fix.yml` (workflow_dispatch). Sam button NIE naprawia
+          # nic sam z siebie — dopiero jego kliknięcie odpala osobny
+          # workflow, patrz komentarz w `auto-fix.yml`.
+          KEYBOARD='{"inline_keyboard":[[{"text":"🔧 Napraw","callback_data":"fix:${{ github.run_id }}"}]]}'
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --data-urlencode "text=${MESSAGE}" > /dev/null
+            --data-urlencode "text=${MESSAGE}" \
+            --data-urlencode "reply_markup=${KEYBOARD}" > /dev/null
 
       - name: Notify Telegram on success
         if: success()
