@@ -6,22 +6,36 @@ PMemories CI — listener bota Telegram (strona VPS).
 o menu komend, skan na żądanie i wybór języka PL/EN. Długo odpytuje
 (long-polling) Telegram `getUpdates` i reaguje na:
 
-  - komendę /scan   — odpala pełny build+testy TERAZ (workflow_dispatch na
-                       `ci.yml`), nie czekając na push/PR/harmonogram
-  - komendę /status  — pokazuje wynik ostatniego runu CI
-  - komendę /lang    — przyciski PL/EN, zmienia język wiadomości CI
-                       (zapisuje jako zmienną repo GitHub `CI_LANG`, którą
-                       czyta `ci.yml` przy generowaniu wiadomości)
+  - komendę /scan [ios|android]   — odpala pełny build+testy TERAZ
+                       (workflow_dispatch na `ci.yml`), nie czekając na
+                       push/PR/harmonogram. Bez argumentu = iOS (domyślne,
+                       dla wstecznej kompatybilności z dniem, gdy istniało
+                       tylko jedno repo).
+  - komendę /status [ios|android]  — pokazuje wynik ostatniego runu CI
+  - komendę /lang    — przyciski PL/EN, zmienia język wiadomości CI DLA
+                       OBU repo naraz (zapisuje jako zmienną repo GitHub
+                       `CI_LANG` w każdym z nich, którą czytają oba `ci.yml`)
   - komendę /help i /start — pokazuje to menu
-  - callback_query "fix:<run_id>" — przycisk "🔧 Napraw"/"🔧 Fix" pod
-    wiadomością o błędzie, odpala `auto-fix.yml` z tym run_id
+  - callback_query "fix:<repo>:<run_id>" — przycisk "🔧 Napraw"/"🔧 Fix"
+    pod wiadomością o błędzie, odpala `auto-fix.yml` W WŁAŚCIWYM repo z
+    tym run_id. Wstecznie kompatybilne ze STARYM formatem "fix:<run_id>"
+    (bez repo — sprzed 15.09.2026, kiedy istniało tylko PMemories-iOS)
+    poprzez `_parse_fix_payload`.
 
-Jedno źródło prawdy dla języka: zmienna repo GitHub `CI_LANG` (nie osobny
-plik na VPS) — ten sam bot i te same komunikaty CI czytają jedną wartość,
-zero ryzyka rozjazdu między VPS a GitHub Actions.
+15.09.2026, ten sam dzień — rozszerzone o DRUGIE repo (`PMemories-Android`,
+nowo założone) po tym jak user poprosił o CI "jak mamy na iOS" — jeden bot,
+jeden token, dwa repo, wybierane przez opcjonalny argument komendy albo
+prefiks w `callback_data`.
+
+Jedno źródło prawdy dla języka: zmienna repo GitHub `CI_LANG` w KAŻDYM z
+dwóch repo (nie osobny plik na VPS) — bot i workflow czytają jedną wartość
+per repo, zero ryzyka rozjazdu między VPS a GitHub Actions. `/lang`
+ustawia ją w obu na raz (jeden wybór językowy dla usera, nie osobno per
+platforma).
 
 Wymaga zmiennych środowiskowych: TELEGRAM_BOT_TOKEN, GITHUB_TOKEN (scope
-`repo` + `workflow`, ten sam co reszta pipeline'u).
+`repo` + `workflow`, ten sam co reszta pipeline'u, działający na oba repo
+bo to ten sam właściciel/konto).
 """
 import json
 import os
@@ -31,29 +45,37 @@ import urllib.error
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
-REPO = os.environ.get("GITHUB_REPO", "piotrekmarkowski/PMemories-iOS")
 OFFSET_FILE = os.environ.get("OFFSET_FILE", "/opt/pmemories-ci-bot/offset.txt")
 
 TG_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+
+# Dwa repo, jeden bot — "ios" zostaje DOMYŚLNYM aliasem (komendy bez
+# argumentu / stary format callback_data sprzed drugiego repo).
+REPOS = {
+    "ios": "piotrekmarkowski/PMemories-iOS",
+    "android": "piotrekmarkowski/PMemories-Android",
+}
+DEFAULT_REPO_KEY = "ios"
 
 TEXT = {
     "pl": {
         "help": (
             "🤖 PMemories CI bot\n\n"
-            "/scan — uruchom pełny skan błędów teraz\n"
-            "/status — pokaż wynik ostatniego skanu\n"
-            "/lang — zmień język (PL/EN)\n"
+            "/scan [ios|android] — uruchom pełny skan błędów teraz (domyślnie iOS)\n"
+            "/status [ios|android] — pokaż wynik ostatniego skanu\n"
+            "/lang — zmień język (PL/EN, dotyczy obu platform)\n"
             "/help — to menu\n\n"
-            "Automatycznie: skanuję przy każdym pushu/PR i codziennie o "
-            "12:00 (UK). Przy błędzie dostaniesz wiadomość z przyciskiem "
-            "🔧 Napraw."
+            "Automatycznie: skanuję przy każdym pushu/PR (iOS i Android osobno) "
+            "i codziennie o 12:00 (UK). Przy błędzie dostaniesz wiadomość z "
+            "przyciskiem 🔧 Napraw."
         ),
-        "scan_started": "🔍 Uruchamiam pełny skan... dam znać za ok. 2-3 minuty.",
+        "scan_started": "🔍 Uruchamiam pełny skan ({repo})... dam znać za ok. 2-3 minuty.",
         "scan_error": "❌ Nie udało się uruchomić skanu: {err}",
-        "status_none": "Nie znalazłem żadnego runu CI.",
-        "status_line": "{emoji} Ostatni skan: {status}\n{url}",
+        "status_none": "Nie znalazłem żadnego runu CI ({repo}).",
+        "status_line": "{emoji} Ostatni skan ({repo}): {status}\n{url}",
         "unknown_cmd": "Nie znam tej komendy — wpisz /help",
-        "lang_prompt": "Wybierz język powiadomień CI:",
+        "unknown_target": "Nie znam platformy \"{target}\" — użyj ios albo android.",
+        "lang_prompt": "Wybierz język powiadomień CI (dla iOS i Android):",
         "lang_set": "Ustawiono: Polski 🇵🇱",
         "fix_started": "Naprawa uruchomiona 🔧",
         "fix_error": "Błąd: {err}",
@@ -61,19 +83,21 @@ TEXT = {
     "en": {
         "help": (
             "🤖 PMemories CI bot\n\n"
-            "/scan — run a full error scan now\n"
-            "/status — show the last scan result\n"
-            "/lang — change language (PL/EN)\n"
+            "/scan [ios|android] — run a full error scan now (defaults to iOS)\n"
+            "/status [ios|android] — show the last scan result\n"
+            "/lang — change language (PL/EN, applies to both platforms)\n"
             "/help — this menu\n\n"
-            "Automatic: I scan on every push/PR and daily at 12:00 (UK). "
-            "On failure you'll get a message with a 🔧 Fix button."
+            "Automatic: I scan on every push/PR (iOS and Android separately) "
+            "and daily at 12:00 (UK). On failure you'll get a message with a "
+            "🔧 Fix button."
         ),
-        "scan_started": "🔍 Starting a full scan... I'll report back in ~2-3 minutes.",
+        "scan_started": "🔍 Starting a full scan ({repo})... I'll report back in ~2-3 minutes.",
         "scan_error": "❌ Couldn't start the scan: {err}",
-        "status_none": "No CI runs found.",
-        "status_line": "{emoji} Last scan: {status}\n{url}",
+        "status_none": "No CI runs found ({repo}).",
+        "status_line": "{emoji} Last scan ({repo}): {status}\n{url}",
         "unknown_cmd": "Unknown command — type /help",
-        "lang_prompt": "Choose the CI notification language:",
+        "unknown_target": "Unknown platform \"{target}\" — use ios or android.",
+        "lang_prompt": "Choose the CI notification language (applies to both iOS and Android):",
         "lang_set": "Set to: English 🇬🇧",
         "fix_started": "Fix started 🔧",
         "fix_error": "Error: {err}",
@@ -133,22 +157,33 @@ def gh_call(method, path, payload=None):
         raise
 
 
-def get_lang():
+def _resolve_repo(key):
+    """Zwraca (repo_key, repo_full_name) albo (None, None) jeśli nieznany alias."""
+    key = (key or DEFAULT_REPO_KEY).lower()
+    if key not in REPOS:
+        return None, None
+    return key, REPOS[key]
+
+
+def get_lang(repo_key):
     # `CI_LANG` to zwykła zmienna repo (Settings → Secrets and variables →
     # Actions → Variables), nie sekret — jawnie widoczna, bez ryzyka.
-    result = gh_call("GET", f"/repos/{REPO}/actions/variables/CI_LANG")
+    repo = REPOS[repo_key]
+    result = gh_call("GET", f"/repos/{repo}/actions/variables/CI_LANG")
     if result and "value" in result:
         return result["value"] if result["value"] in TEXT else "pl"
     return "pl"
 
 
-def set_lang(lang):
-    payload = {"name": "CI_LANG", "value": lang}
-    existing = gh_call("GET", f"/repos/{REPO}/actions/variables/CI_LANG")
-    if existing is None:
-        gh_call("POST", f"/repos/{REPO}/actions/variables", payload)
-    else:
-        gh_call("PATCH", f"/repos/{REPO}/actions/variables/CI_LANG", {"value": lang})
+def set_lang_everywhere(lang):
+    """Ustawia `CI_LANG` w OBU repo naraz — jeden wybór językowy dla usera."""
+    for repo in REPOS.values():
+        payload = {"name": "CI_LANG", "value": lang}
+        existing = gh_call("GET", f"/repos/{repo}/actions/variables/CI_LANG")
+        if existing is None:
+            gh_call("POST", f"/repos/{repo}/actions/variables", payload)
+        else:
+            gh_call("PATCH", f"/repos/{repo}/actions/variables/CI_LANG", {"value": lang})
 
 
 def send_message(chat_id, text, reply_markup=None):
@@ -158,15 +193,15 @@ def send_message(chat_id, text, reply_markup=None):
     tg_call("sendMessage", payload)
 
 
-def dispatch_workflow(workflow_file, ref="main", inputs=None):
+def dispatch_workflow(repo, workflow_file, ref="main", inputs=None):
     payload = {"ref": ref}
     if inputs:
         payload["inputs"] = inputs
-    gh_call("POST", f"/repos/{REPO}/actions/workflows/{workflow_file}/dispatches", payload)
+    gh_call("POST", f"/repos/{repo}/actions/workflows/{workflow_file}/dispatches", payload)
 
 
-def latest_run(workflow_file):
-    data = gh_call("GET", f"/repos/{REPO}/actions/workflows/{workflow_file}/runs?per_page=1")
+def latest_run(repo, workflow_file):
+    data = gh_call("GET", f"/repos/{repo}/actions/workflows/{workflow_file}/runs?per_page=1")
     runs = (data or {}).get("workflow_runs", [])
     return runs[0] if runs else None
 
@@ -179,8 +214,8 @@ def register_menu():
         "setMyCommands",
         {
             "commands": [
-                {"command": "scan", "description": "🔍 Skan teraz / Scan now"},
-                {"command": "status", "description": "📊 Ostatni wynik / Last result"},
+                {"command": "scan", "description": "🔍 Skan teraz / Scan now [ios|android]"},
+                {"command": "status", "description": "📊 Ostatni wynik / Last result [ios|android]"},
                 {"command": "lang", "description": "🌐 Język / Language"},
                 {"command": "help", "description": "❓ Menu / Help"},
             ]
@@ -189,23 +224,38 @@ def register_menu():
 
 
 def handle_command(chat_id, text):
-    lang = get_lang()
+    parts = text.split()
+    cmd = parts[0].lstrip("/").split("@")[0].lower()
+    arg = parts[1] if len(parts) > 1 else None
+
+    # Język wiadomości bierzemy z domyślnego repo (iOS) — obie zmienne
+    # CI_LANG trzymamy zsynchronizowane przez `/lang`, więc to bezpieczne
+    # uproszczenie zamiast odpytywać dwa razy dla samego menu.
+    lang = get_lang(DEFAULT_REPO_KEY)
     t = TEXT[lang]
-    cmd = text.split()[0].lstrip("/").split("@")[0].lower()
+
     if cmd == "scan":
+        repo_key, repo = _resolve_repo(arg)
+        if repo is None:
+            send_message(chat_id, t["unknown_target"].format(target=arg))
+            return
         try:
-            dispatch_workflow("ci.yml")
-            send_message(chat_id, t["scan_started"])
+            dispatch_workflow(repo, "ci.yml")
+            send_message(chat_id, t["scan_started"].format(repo=repo_key))
         except Exception as e:
             send_message(chat_id, t["scan_error"].format(err=e))
     elif cmd == "status":
-        run = latest_run("ci.yml")
+        repo_key, repo = _resolve_repo(arg)
+        if repo is None:
+            send_message(chat_id, t["unknown_target"].format(target=arg))
+            return
+        run = latest_run(repo, "ci.yml")
         if not run:
-            send_message(chat_id, t["status_none"])
+            send_message(chat_id, t["status_none"].format(repo=repo_key))
             return
         conclusion = run.get("conclusion") or run["status"]
         emoji = STATUS_EMOJI.get(conclusion, "⏳")
-        send_message(chat_id, t["status_line"].format(emoji=emoji, status=conclusion, url=run["html_url"]))
+        send_message(chat_id, t["status_line"].format(emoji=emoji, repo=repo_key, status=conclusion, url=run["html_url"]))
     elif cmd == "lang":
         keyboard = {
             "inline_keyboard": [[
@@ -220,6 +270,18 @@ def handle_command(chat_id, text):
         send_message(chat_id, t["unknown_cmd"])
 
 
+def _parse_fix_payload(data):
+    """"fix:<run_id>" (stary format, sprzed drugiego repo) LUB
+    "fix:<repo_key>:<run_id>" (nowy) — zwraca (repo_key, repo, run_id)."""
+    rest = data[len("fix:"):]
+    if ":" in rest:
+        repo_key, run_id = rest.split(":", 1)
+    else:
+        repo_key, run_id = DEFAULT_REPO_KEY, rest
+    resolved_key, repo = _resolve_repo(repo_key)
+    return resolved_key, repo, run_id
+
+
 def handle_callback(cb):
     data = cb.get("data", "")
     chat_id = cb["message"]["chat"]["id"]
@@ -227,11 +289,17 @@ def handle_callback(cb):
     callback_id = cb["id"]
 
     if data.startswith("fix:"):
-        lang = get_lang()
+        lang = get_lang(DEFAULT_REPO_KEY)
         t = TEXT[lang]
-        run_id = data.split(":", 1)[1]
+        repo_key, repo, run_id = _parse_fix_payload(data)
+        if repo is None:
+            tg_call(
+                "answerCallbackQuery",
+                {"callback_query_id": callback_id, "text": t["unknown_target"].format(target=repo_key), "show_alert": True},
+            )
+            return
         try:
-            dispatch_workflow("auto-fix.yml", inputs={"run_id": run_id})
+            dispatch_workflow(repo, "auto-fix.yml", inputs={"run_id": run_id})
             tg_call("answerCallbackQuery", {"callback_query_id": callback_id, "text": t["fix_started"]})
             tg_call(
                 "editMessageReplyMarkup",
@@ -246,7 +314,7 @@ def handle_callback(cb):
         new_lang = data.split(":", 1)[1]
         if new_lang not in TEXT:
             new_lang = "pl"
-        set_lang(new_lang)
+        set_lang_everywhere(new_lang)
         tg_call("answerCallbackQuery", {"callback_query_id": callback_id, "text": TEXT[new_lang]["lang_set"]})
         tg_call(
             "editMessageText",
@@ -275,7 +343,7 @@ POLL_TIMEOUT = 30
 def main():
     register_menu()
     offset = load_offset()
-    print("PMemories CI bot listener wystartował.", flush=True)
+    print("PMemories CI bot listener wystartował (iOS + Android).", flush=True)
     while True:
         try:
             # timeout gniazda klienta MUSI być dłuższy niż `timeout` który
