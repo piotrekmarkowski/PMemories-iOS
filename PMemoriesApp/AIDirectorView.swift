@@ -180,6 +180,11 @@ struct AIDirectorView: View {
     }
 
     private func runAI() async {
+        // 15.09.2026 — patrz `AnalyticsLogger`. Pełny przebieg AI (opis
+        // zdaniem → dobór stylu) to funkcja idąca do Premium (`Pricing.md`
+        // 15.09.2026: presety zawsze darmowe, pełne AI Premium) — appka
+        // dziś jej nie blokuje, loguje ZAMIAR.
+        AnalyticsLogger.log(.premiumFeatureTapped(feature: "ai_director_full", source: "studio"))
         isThinking = true
         errorMessage = nil
         defer { isThinking = false }

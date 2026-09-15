@@ -584,6 +584,12 @@ struct EditView: View {
                 isShowingAddMedia = true
             }
             ToolbarButton(icon: "music.note", title: L("Music"), isActive: selectedSong != nil) {
+                // 15.09.2026 — patrz `AnalyticsLogger`. Muzyka to jedna z
+                // funkcji idących do Premium (`Pricing.md`, 15.09.2026: Free
+                // to klipy pod social, bez wbudowanej ścieżki) — appka
+                // dziś NIE blokuje jej jeszcze, więc to loguje ZAMIAR
+                // (kto w ogóle sięga po muzykę), nie odbicie od blokady.
+                AnalyticsLogger.log(.premiumFeatureTapped(feature: "music", source: "studio"))
                 isShowingMusicPicker = true
             }
             ToolbarButton(icon: "paintpalette", title: L("Style"), isActive: colorStyle != .none) {
@@ -603,6 +609,10 @@ struct EditView: View {
                 isShowingTotalDuration = true
             }
             ToolbarButton(icon: "pip", title: "PiP", isActive: !overlays.isEmpty) {
+                // 15.09.2026 — patrz `AnalyticsLogger`, ten sam duch co
+                // przycisk Music wyżej (loguje zamiar, appka jeszcze nie
+                // blokuje).
+                AnalyticsLogger.log(.premiumFeatureTapped(feature: "overlay_pip", source: "studio"))
                 isShowingAddOverlay = true
             }
         }
@@ -824,6 +834,7 @@ struct EditView: View {
     }
 
     private func performExport() async {
+        AnalyticsLogger.log(.exportStarted)
         isExporting = true
         exportProgress = 0
         wasBackgroundedDuringExport = false
@@ -978,6 +989,14 @@ struct EditView: View {
             syncProject()
             try? modelContext.save()
             didExportSucceed = true
+            // 15.09.2026 — patrz `AnalyticsLogger`. `mayUsePremiumTransitions`
+            // już policzone wyżej (przed `buildComposition`) — reużywane tu
+            // zamiast liczyć drugi raz.
+            AnalyticsLogger.log(.exportCompleted(
+                durationSeconds: composedProject.composition.duration.seconds,
+                usedColorFilter: hasColorStyle,
+                usedPremiumBoundTransition: mayUsePremiumTransitions
+            ))
             ExportNotifier.notify(
                 title: L("Your movie is ready!"),
                 body: project.title.isEmpty ? L("Saved to your camera roll.") : project.title

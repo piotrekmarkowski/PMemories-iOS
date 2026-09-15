@@ -49,6 +49,7 @@ struct LeaderboardView: View {
         }
         .navigationTitle(L("Ranking"))
         .task {
+            AnalyticsLogger.log(.leaderboardOpened)
             if auth.isSignedIn {
                 await refresh()
                 await loadMyCircle()

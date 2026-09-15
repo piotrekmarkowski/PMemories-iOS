@@ -83,13 +83,29 @@ TEXT = {
 STATUS_EMOJI = {"success": "✅", "failure": "❌"}
 
 
-def tg_call(method, payload):
+def tg_call(method, payload, timeout=20):
+    # 15.09.2026 — złapany na żywo prawdziwy bug: `getUpdates` prosi Telegram
+    # o przytrzymanie połączenia do `timeout` sekund (long-polling), ale
+    # domyślny timeout GNIAZDA klienta (20s) był KRÓTSZY niż to o co prosimy
+    # serwer (30s) — więc regularnie wywalało "read operation timed out"
+    # zanim serwer zdążył odpowiedzieć. `main()` woła to teraz z osobnym,
+    # dłuższym timeoutem dla `getUpdates` konkretnie.
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
         f"{TG_API}/{method}", data=data, headers={"Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        # 15.09.2026 — pierwsza wersja gubiła treść odpowiedzi Telegrama przy
+        # 400/403 itp. (sam kod "HTTP Error 400: Bad Request" bez `description`
+        # z body) — złapane na żywo, nie dało się zdiagnozować co konkretnie
+        # odrzucił Telegram. `e.read()` daje realny powód (np. zły chat_id,
+        # zła struktura `reply_markup`).
+        body = e.read().decode(errors="replace")
+        print(f"tg_call({method}) HTTP {e.code}: {body}", flush=True)
+        raise
 
 
 def gh_call(method, path, payload=None):
@@ -112,6 +128,8 @@ def gh_call(method, path, payload=None):
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
+        body = e.read().decode(errors="replace")
+        print(f"gh_call({method} {path}) HTTP {e.code}: {body}", flush=True)
         raise
 
 
@@ -251,13 +269,20 @@ def save_offset(offset):
         f.write(str(offset))
 
 
+POLL_TIMEOUT = 30
+
+
 def main():
     register_menu()
     offset = load_offset()
     print("PMemories CI bot listener wystartował.", flush=True)
     while True:
         try:
-            resp = tg_call("getUpdates", {"offset": offset, "timeout": 30})
+            # timeout gniazda klienta MUSI być dłuższy niż `timeout` który
+            # prosimy serwer przytrzymać (patrz komentarz przy `tg_call`).
+            resp = tg_call(
+                "getUpdates", {"offset": offset, "timeout": POLL_TIMEOUT}, timeout=POLL_TIMEOUT + 10
+            )
         except Exception as e:
             print(f"getUpdates error: {e}", flush=True)
             time.sleep(5)
@@ -273,8 +298,9 @@ def main():
                     chat_id = update["message"]["chat"]["id"]
                     if text.startswith("/"):
                         handle_command(chat_id, text)
-            except Exception as e:
-                print(f"handler error: {e}", flush=True)
+            except Exception:
+                import traceback
+                print(f"handler error:\n{traceback.format_exc()}", flush=True)
 
 
 if __name__ == "__main__":

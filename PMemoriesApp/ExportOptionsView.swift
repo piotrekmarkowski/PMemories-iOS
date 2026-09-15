@@ -23,6 +23,14 @@ struct ExportOptionsView: View {
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 24)
+            // 15.09.2026 — patrz `AnalyticsLogger`. 4K to funkcja idąca do
+            // Premium (`Pricing.md`) — appka dziś nie blokuje jej wyboru,
+            // loguje ZAMIAR (kto w ogóle sięga po najwyższą jakość).
+            .onChange(of: quality) { _, newValue in
+                if newValue == .uhd4k {
+                    AnalyticsLogger.log(.premiumFeatureTapped(feature: "export_4k", source: "studio"))
+                }
+            }
 
             Text("Higher quality means a larger file and a longer export time.")
                 .font(.caption)
@@ -35,5 +43,9 @@ struct ExportOptionsView: View {
             Spacer(minLength: 0)
         }
         .padding()
+        // 15.09.2026 — patrz `AnalyticsLogger`.
+        .onAppear {
+            AnalyticsLogger.log(.premiumFeatureViewed(feature: "export_quality", source: "studio"))
+        }
     }
 }

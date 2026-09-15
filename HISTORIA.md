@@ -3727,3 +3727,49 @@ User: "chcę mieć menu w moim CI bocie... czy mogę włączyć skan żeby mi pr
 - Systemd unit wdrożony i `enable`'owany na VPS (`scp` + `systemctl daemon-reload && enable` — to akurat NIE zostało zablokowane przez klasyfikator, w przeciwieństwie do plików z sekretami).
 
 **Nadal blokujące (ten sam rodzaj tarcia co zawsze z sekretami)**: `/opt/pmemories-ci-bot/env` (`TELEGRAM_BOT_TOKEN`+`GITHUB_TOKEN`) wciąż nie istnieje na VPS — user musi go stworzyć ręcznie (dokładna komenda w `telegram-bot/README.md`), potem `systemctl start pmemories-ci-bot`. Bez tego menu/`/scan`/`/lang` fizycznie nie działają (sam plik `listener.py` już tam leży i service jest `enabled`, tylko nie odpalony).
+
+## 15.09.2026 (ciąg dalszy) — Podstawowa telemetria produktowa (AnalyticsLogger)
+
+User, po przejrzeniu podziału Free/Premium na świeżo zbudowanej stronie funkcji: "muszę to jeszcze raz przemyśleć czy ludzie będą chcieli płacić za te dodatkowe funkcje czy wystarczy im free wersja" → zapytany jak to w ogóle zobaczy (appka nie miała ŻADNEJ telemetrii) → "robimy to od razu w tym że na tą chwilę mało kto z moich znajomych z tego korzysta więc i tak mało co zobaczę" — świadoma decyzja: zacząć zbierać dane TERAZ, zanim baza userów urośnie, żeby nie stracić wczesnych sygnałów.
+
+**Zbudowane**: `AnalyticsLogger.swift` — zamiast nowej zależności (Firebase Analytics/TelemetryDeck, oba wymagałyby zakładania kolejnego zewnętrznego konta w przeglądarce, ten sam rodzaj tarcia co Firebase na Androidzie wczoraj), wykorzystuje JUŻ istniejący, skonfigurowany kontener CloudKit (`LeaderboardService`). Osobny, ŚWIADOMIE ANONIMOWY identyfikator per-urządzenie (losowy `UUID` w `UserDefaults`, NIE identyfikator Sign in with Apple) — appka i tak pozycjonuje się jako prywatność-pierwsza ("no GPS tracking", `Brand.md`), telemetria idzie w tym samym duchu: co się dzieje, nie kto to robi. Fire-and-forget (`Task.detached`, błędy po cichu ignorowane) — telemetria nigdy nie blokuje/przerywa prawdziwej akcji usera.
+
+**4 zdarzenia, celowo wąski zestaw** (nie "loguj wszystko" — każde wybrane bo wprost odpowiada na pytanie z `Pricing.md`):
+- `app_opened` — mianownik dla reszty, w `init()` appki (zimny start), nie `HomeView.onAppear` (może się odpalić wielokrotnie w jednej sesji).
+- `export_completed` — długość finalnego filmu (przyszła ocena limitu 1 min Free), czy użyto filtra kolorystycznego, czy użyto JAKIEGOKOLWIEK z 12 przejść idących do Premium.
+- `transport_mode_used` — per UNIKALNY środek transportu w zapisanej trasie (nie per przystanek), z tym samym filtrem `order > 0` co `TravelJourneyPosterView.flightCount` (pomija sztuczny przystanek startowy) — wprost mierzy popyt na "wiele środków transportu" (planowana przewaga Premium Travel Map).
+- `leaderboard_opened` — zaangażowanie w Ranking, dziś darmowy na stałe (decyzja 15.09.2026: "to viral loop appki"), warto mieć twardą liczbę na wypadek gdyby ta decyzja kiedyś wróciła pod dyskusję.
+
+**Weryfikacja**: `xcodebuild build` → BUILD SUCCEEDED, zainstalowane i odpalone na "Pit" (`devicectl device install/launch`) — pierwsze `app_opened` wysłane. Bezpośrednie potwierdzenie w CloudKit (`cktool query-records`) NIEUDANE — ten sam token deweloperski z dzisiejszej sesji (Leaderboard-debugging wcześniej) już wygasł. Mechanizm identyczny jak `LeaderboardEntry` (auto-tworzenie typu rekordu + domyślnych uprawnień przy pierwszym zapisie w środowisku Development, bez ręcznego zakładania schematu) — wysokie prawdopodobieństwo że działa, ale NIE potwierdzone wprost. Do zweryfikowania przy najbliższej okazji ze świeżym tokenem (`xcrun cktool save-token --type user`, ten sam User Token z icloud.developer.apple.com co wcześniej dziś).
+
+**Świadomie NIE zrobione**: żaden dashboard/UI do przeglądania zebranych danych — na razie surowe odpytywanie przez `cktool query-records --record-type AppEvent`, tak jak dziś odpytuje się `LeaderboardEntry`. Osobna decyzja na później, jeśli ręczne odpytywanie okaże się niewygodne przy większej liczbie zdarzeń.
+
+### Rozszerzenie tego samego dnia — pełniejszy funnel (user przesłał gotową, szczegółową listę zdarzeń)
+
+User pochwalił kierunek i dopisał konkretną, dobrze przemyślaną listę: `premium_feature_viewed`/`tapped`, `paywall_opened`/`closed`, `purchase_started`/`completed`/`failed`, `free_limit_reached`, `export_started`, `upgrade_button_tapped` + wspólne parametry (nazwa funkcji, plan Free/Premium, źródło ekranu, typ urządzenia, wersja appki) — z jasnym zastrzeżeniem: **nie zmieniać obecnego podziału Free/Premium, najpierw zbierać dane**.
+
+**Uczciwie rozdzielone na dwie warstwy** (appka nie ma dziś paywalla/StoreKit/egzekwowanego limitu długości — część zdarzeń z listy fizycznie nie ma skąd się odpalić):
+
+1. **Realnie podpięte** (mierzą ZAMIAR, appka niczego jeszcze nie blokuje):
+   - `export_started` — początek `performExport()`.
+   - `premium_feature_tapped`/`premium_feature_viewed` — Music i PiP w toolbarze Studio (`EditView`), zablokowane style w `StyleView` (dodany `onTapGesture` na wcześniej całkiem nieinteraktywnym wierszu z kłódką — appka dalej niczego nie odblokowuje, tylko teraz REJESTRUJE dotknięcie), wybór 4K w `ExportOptionsView` (`onChange`), pełny przebieg AI Director (`runAI()`), i multi-transport w `TravelMapView` (odpala się po DOKOŃCZONYM zapisie trasy z więcej niż jednym różnym środkiem transportu — wyższa jakość sygnału niż liczenie samych kliknięć pickera).
+   - Wspólne pola na KAŻDYM zdarzeniu (nie tylko nowych): `planTier` (dziś zawsze `"free"` — appka nie ma jeszcze żadnego realnego rozróżnienia kont), `deviceType` (iPhone/iPad).
+2. **Zdefiniowane w `AnalyticsLogger.Event`, świadomie NIEPODPIĘTE** — `paywallOpened`/`Closed`, `purchaseStarted`/`Completed`/`Failed`, `upgradeButtonTapped`, `freeLimitReached`. Zero call-site'ów, bo appka nie ma dziś ekranu paywalla ani egzekwowanego limitu 1 minuty (to dopiero "NOWA funkcja do zbudowania", `Pricing.md`). Zostają w schemacie JUŻ TERAZ (ten sam powód co `planTier` wyżej) — jeden stabilny schemat zamiast dwóch migracji, gdy system płatności faktycznie powstanie.
+
+**Świadomie pominięte, bez zgadywania**: ramki awatara (`AvatarFrame`) — appka nie ma dziś w kodzie żadnej wizualnej/interakcyjnej granicy między "podstawowym zestawem" a "pełną kolekcją" (`isPremiumBadge` filtruje tylko odznaki systemowe, nie oddziela darmowego od premium zestawu userowi wybieralnego), więc podpięcie `premium_feature_tapped` wymagałoby zgadywania której konkretnie ramki dotyczy — do zrobienia dopiero gdy ten podział faktycznie zaistnieje w UI.
+
+**Weryfikacja**: `xcodebuild build` → BUILD SUCCEEDED, zainstalowane na "Pit" (`devicectl device install`). Potwierdzenie zapisów w CloudKit nadal czeka na świeży token (patrz wyżej).
+
+### Domknięte tego samego dnia — realny bug znaleziony: Production nie auto-tworzy schematu
+
+Po podpięciu zdarzeń: appka odpalona kilka razy na "Pit", ZERO rekordów w CloudKit (`cktool query-records --record-type AppEvent` → "not-found"). Cichy `try?` w `AnalyticsLogger.log` ukrywał prawdziwy powód — dodany tymczasowy `print()` (usunięty po diagnozie) ujawnił: `CKError "Invalid Arguments" (12/2006); server message = "Cannot create new type AppEvent in production schema"`.
+
+**Prawdziwa przyczyna**: appka ZAWSZE łączy się z Production (`project.yml`, decyzja z 09.08.2026 żeby lokalne buildy i TestFlight widziały tę samą bazę) — ale **Production w CloudKit NIE auto-tworzy nowych typów rekordów** przy pierwszym zapisie, w przeciwieństwie do Development (stąd `LeaderboardEntry` kiedyś zadziałał bez ręcznej konfiguracji — bo w momencie jego powstania appka jeszcze nie wymuszała Production, albo schemat już wcześniej trafił tam ręcznie).
+
+**Naprawa**: `cktool import-schema --environment development` z pełnym schematem (istniejące 4 typy + nowy `AppEvent`, 19 pól, te same uprawnienia co `LeaderboardEntry` — `GRANT WRITE TO "_creator"`, `GRANT CREATE TO "_icloud"`, `GRANT READ TO "_world"`) — `cktool` odmawia bezpośredniej modyfikacji Production (`"endpoint not applicable in the environment 'production'"`), to zabezpieczenie Apple. User ręcznie wdrożył zmianę przez CloudKit Dashboard (Schema → Record Types → "Deploy Schema Changes to Production") — jedyny krok w całym procesie wymagający przeglądarki. Po wdrożeniu: `AppEvent` potwierdzony w schemacie Production, pierwsze prawdziwe zdarzenie (`app_opened`, iPhone, appVersion 1.0.2) zapisane i odczytane z powrotem przez `cktool query-records` — pełny cykl zweryfikowany end-to-end.
+
+**Wniosek na przyszłość, dopisany do komentarza w kodzie**: KAŻDY nowy typ rekordu CloudKit (nie tylko `AppEvent`) wymaga tego samego dwuetapowego procesu — najpierw Development, potem ręczne "Deploy Schema Changes to Production" w przeglądarce. Zapomnienie o tym kroku wygląda jak cichy, bezobjawowy brak zapisu (appka działa normalnie, po prostu nic nie trafia do bazy).
+
+Tymczasowy `print()` diagnostyczny usunięty, kod wrócił do cichego `try?` (telemetria ma pozostać fire-and-forget).
+
+**Stan na koniec dnia**: analityka w pełni działająca i zweryfikowana na "Pit". Nowy build (Debug) zainstalowany lokalnie. TestFlight wciąż na starym buildzie 27 (bez analityki) — testerzy nie generują jeszcze żadnych danych, dopóki nie wyjdzie nowy build.

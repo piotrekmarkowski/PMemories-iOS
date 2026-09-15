@@ -22,7 +22,7 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         CFBundleShortVersionString: "1.0.2"
-        CFBundleVersion: "27"
+        CFBundleVersion: "28"
         ITSAppUsesNonExemptEncryption: false
         LSSupportsOpeningDocumentsInPlace: true
         # Wysyłanie zaplanowanej podróży do kogoś innego (11.08.2026) —

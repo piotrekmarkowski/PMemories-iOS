@@ -46,6 +46,11 @@ struct PMemoriesAppApp: App {
 
     init() {
         TempFileCleanup.purgeStaleTemporaryFiles()
+        // 15.09.2026 — patrz `AnalyticsLogger`. Tu, nie w `HomeView.onAppear`,
+        // żeby liczyć RAZY appka faktycznie wystartowała (zimny start), nie
+        // razy `HomeView` się zrenderował (może się zdarzyć wielokrotnie w
+        // jednej sesji przy nawigacji).
+        AnalyticsLogger.log(.appOpened)
     }
 
     var body: some Scene {

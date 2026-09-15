@@ -648,6 +648,27 @@ struct TravelMapView: View {
         // (np. przełączenie zakładki) zanim SwiftData samo odłoży zmiany na
         // dysk.
         try? modelContext.save()
+
+        // 15.09.2026 — patrz `AnalyticsLogger`. `order > 0` — pomija sztuczny
+        // przystanek startowy (ten sam filtr co `TravelJourneyPosterView.
+        // flightCount`, patrz komentarz tam: order-0 zawsze niesie
+        // `TransportMode.plane` jako wartość domyślną, nie realny wybór
+        // usera). Jeden log PER UNIKALNY środek transportu w tej trasie, nie
+        // per przystanek — mierzy "ile tras UŻYŁO trybu X", nie "ile
+        // przystanków".
+        let usedModes = Set(savedStops.filter { $0.order > 0 }.map(\.transportRawValue))
+        for mode in usedModes {
+            AnalyticsLogger.log(.transportModeUsed(mode: mode))
+        }
+        // 15.09.2026 — patrz `AnalyticsLogger`. Więcej niż jeden RÓŻNY
+        // środek transportu w TEJ SAMEJ podróży to funkcja idąca do
+        // Premium (`Pricing.md`: "Free — jeden środek transportu, Premium
+        // — wszystkie"). Liczy się dopiero po realnym, DOKOŃCZONYM zapisie
+        // trasy (nie każde dotknięcie pickera w trakcie edycji) — wyższa
+        // jakość sygnału niż liczenie samych kliknięć.
+        if usedModes.count > 1 {
+            AnalyticsLogger.log(.premiumFeatureTapped(feature: "multi_transport", source: "travel_map"))
+        }
     }
 
     /// Wczytuje przystanki zapisanej podróży z powrotem do edytowalnego

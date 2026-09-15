@@ -1017,6 +1017,10 @@ struct TravelJourneyPosterView: View {
             statColumn(icon: "mappin.and.ellipse", value: stats.totalKm.formatted(), label: L("KM Travelled"))
             plainDivider
             statColumn(icon: "airplane", value: "\(stats.flightCount)", label: L("Flights"))
+            if let peak = stats.highestPeak {
+                plainDivider
+                statColumn(icon: "mountain.2.fill", value: "\(peak.meters.formatted())m", label: peak.name)
+            }
         }
         .padding(.vertical, 20)
         .frame(maxWidth: .infinity)
@@ -1807,6 +1811,17 @@ private struct JourneyStats {
     let tripCount: Int
     let totalKm: Int
     let flightCount: Int
+    /// Najwyższy szczyt zdobyty w KTÓREJKOLWIEK podróży — 15.09.2026, user:
+    /// "na poster trzeba jeszcze wkomponować najwyższy szczyt jak ktoś ma".
+    /// `nil` dla userów bez ani jednej Wędrówki z policzoną wysokością —
+    /// `statsPlaque` świadomie NIE pokazuje wtedy piątej kolumny zamiast
+    /// zera/pustego miejsca (ten sam duch co reszta plakatu — uczciwy stan
+    /// pusty zamiast zmyślonych danych, patrz `HomeView`/`UI.md`).
+    /// Nazwa szczytu to `cityName` przystanku Wędrówki o najwyższym
+    /// `highestElevationMeters` — dokładnie tak appka nazywa szczyty dodane
+    /// przez `PeakSearchView`/`PeakDetector` (nie ma osobnego pola "nazwa
+    /// szczytu", to ten sam mechanizm co każdy inny przystanek).
+    let highestPeak: (name: String, meters: Int)?
 
     init(from trips: [SavedTrip]) {
         let allStops = trips.flatMap(\.stops)
@@ -1831,6 +1846,14 @@ private struct JourneyStats {
         // `countryCount` wyżej, świadomie używający tego samego mechanizmu
         // co Passport/Explorer Score).
         flightCount = allStops.filter { $0.order > 0 && $0.legDistanceKm > 0 && $0.transportRawValue == TransportMode.plane.rawValue }.count
+        let peakStop = allStops
+            .filter { $0.transportRawValue == TransportMode.hiking.rawValue && $0.highestElevationMeters != nil }
+            .max { ($0.highestElevationMeters ?? 0) < ($1.highestElevationMeters ?? 0) }
+        if let peakStop, let meters = peakStop.highestElevationMeters {
+            highestPeak = (name: peakStop.cityName, meters: Int(meters.rounded()))
+        } else {
+            highestPeak = nil
+        }
     }
 }
 

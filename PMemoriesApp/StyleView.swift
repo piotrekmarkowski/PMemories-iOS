@@ -99,6 +99,18 @@ struct StyleView: View {
                                 Image(systemName: "lock.fill")
                                     .foregroundStyle(.secondary)
                             }
+                            .contentShape(Rectangle())
+                            // 15.09.2026 — patrz `AnalyticsLogger`. Wiersz
+                            // dotąd nie reagował na dotknięcie w ŻADEN
+                            // sposób (zwykły `HStack`, nie `Button`) — teraz
+                            // rejestruje SAMO dotknięcie zablokowanego
+                            // stylu jako sygnał zainteresowania, nic więcej
+                            // się nie dzieje (appka wciąż niczego nie
+                            // odblokowuje, zgodnie z decyzją usera "tego
+                            // narazie nie ruszamy").
+                            .onTapGesture {
+                                AnalyticsLogger.log(.premiumFeatureTapped(feature: "transition_\(style.rawValue)", source: "studio"))
+                            }
                         }
                     }
                 } header: {
@@ -116,6 +128,12 @@ struct StyleView: View {
                     Button(L("Done")) { dismiss() }
                 }
             }
+        }
+        // 15.09.2026 — patrz `AnalyticsLogger`. Raz na otwarcie ekranu, nie
+        // per wiersz — mierzy "ile razy w ogóle ktoś zobaczył sekcję
+        // Premium Transitions", nie każdy pojedynczy scroll.
+        .onAppear {
+            AnalyticsLogger.log(.premiumFeatureViewed(feature: "transitions", source: "studio"))
         }
     }
 
