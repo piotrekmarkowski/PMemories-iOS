@@ -12,6 +12,7 @@
 		03F556ED88715BD7BE0F9579 /* TravelMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAEFAC2C4B55C79492DDD2F9 /* TravelMap.swift */; };
 		04ED2D5EAD13018E0F43A827 /* TravelLiveMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AC2762CDCA3A53EB87FBD84 /* TravelLiveMapView.swift */; };
 		085F4ACBA28988503B2CF365 /* TravelCinematics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24F8D49FF96C469C2DDF9AE5 /* TravelCinematics.swift */; };
+		0A571B292EEF4A64CBD468C3 /* TravelAchievementsCalculatorTests 2.swift in Sources */ = {isa = PBXBuildFile; fileRef = A061E1C6E0A80233D17FFE6C /* TravelAchievementsCalculatorTests 2.swift */; };
 		0A648024F0C7F88AE57AA0EA /* ElevationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15A43911AAEB200235FA71B7 /* ElevationProvider.swift */; };
 		0D1D088C0C37A36C6FAC1C01 /* RouteProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7AB7A10AC64C6E3AE362F78 /* RouteProvider.swift */; };
 		0D5ACB071B68D59D3BB99610 /* ExportOptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB741B9B3BF1FF5480D9E4D7 /* ExportOptionsView.swift */; };
@@ -90,6 +91,7 @@
 		B851F7BF3ECE395824DF4D7C /* TransitionStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EDB715035CBB8BE8B563577 /* TransitionStyle.swift */; };
 		BB20F26F2C236ED871976510 /* TravelRarityScore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0642BA5A01F0D9A764D70851 /* TravelRarityScore.swift */; };
 		BC5812CD622EC0257A06E560 /* ColorGrader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BADFBBEDECF70C773A8FB81 /* ColorGrader.swift */; };
+		BD17382BDA0D519A80CBCD64 /* SolarTimeTests 2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B57EB1D8F981168502671D0 /* SolarTimeTests 2.swift */; };
 		C6BC99D580731332BD167040 /* PeakSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2287BAFCD4D30DA69E5BF7 /* PeakSearchView.swift */; };
 		C6C7CC2EA20DABA8F3DE0DC4 /* TravelPassportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5812E4EB6C41A03301E1C403 /* TravelPassportView.swift */; };
 		C838140C0C5E9B22FD4E2DEA /* ColorStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CC5D93F3DFDDDBF5F428808 /* ColorStyle.swift */; };
@@ -111,6 +113,7 @@
 		E32F7EE7CDE2C9E871874691 /* TripPlanningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F88C4DE0D206222761B19F7 /* TripPlanningView.swift */; };
 		E39DA8DE8EF7BBD4AA006087 /* AirportDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BDFD7F1662BA3F4C73688DF /* AirportDatabase.swift */; };
 		F4431C91CE1CA21E900677F6 /* AIDirectorEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = C550207838376099CD6066B7 /* AIDirectorEngine.swift */; };
+		F8E8435F4965464C3C81C136 /* SeasonTests 2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BCAE639E572D7AC653B23BA /* SeasonTests 2.swift */; };
 		F9D92DC64EB15F687866E470 /* OverlaySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF1D3CEB4C29078E5A6A1E3A /* OverlaySettingsView.swift */; };
 		FDAC4360899ABAD786B95C4E /* EditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2078178707E2AC6DDC2B39BB /* EditView.swift */; };
 /* End PBXBuildFile section */
@@ -146,6 +149,7 @@
 		22124BA702EBBEDDB700D828 /* MusicLibrarySuggester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicLibrarySuggester.swift; sourceTree = "<group>"; };
 		248B2651FD09CBA2890E9BAE /* PMemoriesAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMemoriesAppApp.swift; sourceTree = "<group>"; };
 		24F8D49FF96C469C2DDF9AE5 /* TravelCinematics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelCinematics.swift; sourceTree = "<group>"; };
+		2B57EB1D8F981168502671D0 /* SolarTimeTests 2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SolarTimeTests 2.swift"; sourceTree = "<group>"; };
 		2E3D8ED4D7793EF150B0871E /* WorldCountryBoundaries.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldCountryBoundaries.swift; sourceTree = "<group>"; };
 		3239A09117428511CA0257E8 /* LivePhotoVideoExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePhotoVideoExtractor.swift; sourceTree = "<group>"; };
 		33027AFA4906422E731ABA24 /* TravelWrappedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelWrappedView.swift; sourceTree = "<group>"; };
@@ -185,6 +189,7 @@
 		820CD7DBF1EDC31BD2F47B6E /* AppSkin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSkin.swift; sourceTree = "<group>"; };
 		8534B42E69E3174675BB2711 /* JourneyStampAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JourneyStampAssets.swift; sourceTree = "<group>"; };
 		8925D980536E3E3693A9830E /* PMemoriesOutroCardRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMemoriesOutroCardRenderer.swift; sourceTree = "<group>"; };
+		8BCAE639E572D7AC653B23BA /* SeasonTests 2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SeasonTests 2.swift"; sourceTree = "<group>"; };
 		8DD2394BCDCA03DC21CD13FF /* PosterPhotoCustomizationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PosterPhotoCustomizationView.swift; sourceTree = "<group>"; };
 		94A2552A8D1B9030F5B886CD /* WorldGlobeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldGlobeView.swift; sourceTree = "<group>"; };
 		9542D34F7D95E3506A2F3965 /* ExportQuality.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportQuality.swift; sourceTree = "<group>"; };
@@ -193,6 +198,7 @@
 		99A93C06BE360C3266096B34 /* ExportNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportNotifier.swift; sourceTree = "<group>"; };
 		99B9EC600DF06E187DEC5040 /* TravelRouteOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelRouteOverviewView.swift; sourceTree = "<group>"; };
 		99FE099D5A94C169E6E782C7 /* TravelMapVideoRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelMapVideoRenderer.swift; sourceTree = "<group>"; };
+		A061E1C6E0A80233D17FFE6C /* TravelAchievementsCalculatorTests 2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TravelAchievementsCalculatorTests 2.swift"; sourceTree = "<group>"; };
 		A27DDEAC9DCEBFE2388DEEED /* LeaderboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaderboardView.swift; sourceTree = "<group>"; };
 		A4C2D055922DD5B1875FECBD /* PhotoRenderCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoRenderCache.swift; sourceTree = "<group>"; };
 		A7976A0743D93EBE95573DAD /* MovieFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovieFile.swift; sourceTree = "<group>"; };
@@ -372,8 +378,11 @@
 		DFC0DFF966668779C10C22BC /* PMemoriesAppTests */ = {
 			isa = PBXGroup;
 			children = (
+				8BCAE639E572D7AC653B23BA /* SeasonTests 2.swift */,
 				34F407AB4DE56EF71AE56B4E /* SeasonTests.swift */,
+				2B57EB1D8F981168502671D0 /* SolarTimeTests 2.swift */,
 				366C0292DDDA1F3188B50273 /* SolarTimeTests.swift */,
+				A061E1C6E0A80233D17FFE6C /* TravelAchievementsCalculatorTests 2.swift */,
 				96943A76247BE29C6067436F /* TravelAchievementsCalculatorTests.swift */,
 			);
 			path = PMemoriesAppTests;
@@ -605,8 +614,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F8E8435F4965464C3C81C136 /* SeasonTests 2.swift in Sources */,
 				8BD39EB3C6A6C2C818334D6E /* SeasonTests.swift in Sources */,
+				BD17382BDA0D519A80CBCD64 /* SolarTimeTests 2.swift in Sources */,
 				E226776ACA331FE44F62236C /* SolarTimeTests.swift in Sources */,
+				0A571B292EEF4A64CBD468C3 /* TravelAchievementsCalculatorTests 2.swift in Sources */,
 				D44B1848CFA611BA9104AB23 /* TravelAchievementsCalculatorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

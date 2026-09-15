@@ -3676,3 +3676,40 @@ User zainteresowany tematem CI/CD po przejrzeniu oferty pracy iOS Developer (Lin
 - Merge PR-a do `main` zablokowany przez klasyfikator uprawnień auto-mode (słusznie — zmiana na współdzielonej gałęzi) — user scala ręcznie albo mówi "scal".
 
 **Świadomie NIE zrobione jeszcze** (kolejne etapy, user poinformowany): testy jednostkowe (projekt ma dziś zero testów), automatyczny upload na TestFlight (wymaga kluczy API App Store Connect zamiast obecnego hasła-z-Keychaina, żeby uniknąć dzisiejszego problemu z zablokowanym ekranem blokującym `altool`).
+
+## 14/15.09.2026 (ciąg dalszy) — CI/CD Etap 3 domknięte na `main` + zdiagnozowany realny bug w Rankingu
+
+**CI/CD — dojście do stabilnego stanu na `main`, kilka rund realnych błędów:**
+
+1. PR #2 (Telegram + harmonogram) okazał się już scalony wcześniej (mimo błędu przy próbie merge'a — `gh pr merge` zrobił scalenie zdalne, tylko lokalny checkout się wywalił na niezacommitowanym pliku). Przycisk "🔧 Napraw" + `auto-fix.yml` zostały wtedy nieprzez przypadek POZA scaleniem (osobny commit już po merge'u PR-a).
+2. Otwarty PR #3 dla tej reszty — **jego CI nigdy się nie odpaliło** mimo aktywnego workflow, poprawnego YAML, braku limitów. Przyczyna nieznana (prawdopodobnie skutek uboczny wcześniejszego usunięcia+odtworzenia tej samej gałęzi, gubiący powiązanie eventów PR). Obejście: scalenie lokalne + push wprost na `main` (to zawsze działało niezawodnie).
+3. **Złapany na PIERWSZYM realnym pushu na `main` (nie na branchu testowym)**: krok "Notify Telegram on success" padał z `command substitution: unexpected end of file`. Przyczyna: `github.event.head_commit.message` dla SQUASH-MERGE commita niesie CAŁY wieloliniowy opis PR-a (nie jedną linię jak zwykły commit) — wklejony wprost w string bash łamał składnię (dosłowne nowe linie + cudzysłowy w treści). Naprawione: wartości przez `env:` (bezpieczne dla dowolnej treści, GitHub Actions zapisuje przez plik, nie przez podstawianie w skrypt) + ucięcie do pierwszej linii.
+4. Po tej poprawce: **CI na `main` w pełni zielone**, wliczając udaną wiadomość Telegram.
+
+**Stan na koniec dnia**: `main` ma kompletne Etapy 1-3 (build+testy na push/PR/harmonogram dziennie o 12:00 UK, powiadomienia Telegram sukces/fail z przyciskiem "Napraw"). Auto-fix (`auto-fix.yml`, Claude Code przez `CLAUDE_CODE_OAUTH_TOKEN` z subskrypcji Pro/Max usera) gotowy, ale **listener na VPS jeszcze nie uruchomiony** (plik `env` z tokenami czeka na wklejenie przez usera — zablokowane klasyfikatorem uprawnień, świadomie, to wrażliwa operacja).
+
+---
+
+## 15.09.2026 — Zdiagnozowany i częściowo naprawiony realny bug: Ranking nie zapisuje wyniku
+
+User złapał ręcznie (i spytał czy nasze CI by to złapało — uczciwa odpowiedź: NIE, to błąd serwera CloudKit, nie coś co testują nasze 13 testów ani co widziałby build). Zrzut ekranu pokazał surowy błąd wprost w UI: `Error saving record <CKRecordID:...> to server: WRITE operation not permitted`.
+
+**Diagnoza przez `cktool export-schema`** (produkcyjny schemat CloudKit): `LeaderboardEntry` ma `GRANT WRITE TO "_creator"` (świadomy, prawidłowy wybór bezpieczeństwa — nikt nie powinien nadpisać cudzego wyniku), `GRANT CREATE TO "_icloud"`, `GRANT READ TO "_world"`. Błąd oznacza: rekord o recordName = identyfikator Sign in with Apple usera JUŻ ISTNIEJE w bazie, ale zapisany przez INNE konto iCloud niż to aktywne teraz na urządzeniu — Sign in with Apple i konto iCloud to dwie niezależne rzeczy w systemie Apple, więc taka rozbieżność jest możliwa (np. urządzenie/Apple ID użyte wcześniej do testów na innym koncie iCloud).
+
+**Naprawione (kod)**: `LeaderboardService.friendlyMessage(for:)` — mapuje `CKError.permissionFailure`/`.notAuthenticated`/`.networkUnavailable`/`.networkFailure` na zrozumiałe komunikaty zamiast surowego `error.localizedDescription`. `LeaderboardView` używa tego teraz w obu miejscach obsługi błędu. Build (Debug) OK, zainstalowane na "Pit", pushnięte na `main` (CI w toku).
+
+**NIE naprawione jeszcze** (wymaga tokenu do CloudKit, dziś wygasłego — ten sam rodzaj tarcia co Telegram/GitHub/Claude wcześniej): usunięcie osieroconego rekordu z produkcyjnej bazy, żeby faktyczne zapisywanie wyniku znowu zadziałało. Appka teraz przynajmniej jasno tłumaczy co się stało zamiast pokazywać techniczny zrzut.
+
+### Dokończone tego samego wieczoru — prawdziwa przyczyna okazała się INNA niż pierwsza diagnoza
+
+Świeży User Token wygenerowany w CloudKit Console (icloud.developer.apple.com → kontener → API Access → Tokens), zapisany przez `xcrun cktool save-token --type user --method keychain`. Bezpośrednie zapytanie (`cktool query-records --team-id X3NAM3PL95 ...`) pokazało rekord "Piotr" — **ostatnio poprawnie zapisany 13.09, dwa dni przed błędem**, więc to nie była trwała blokada od zawsze.
+
+Skasowano rekord w `production` (`cktool delete-record`) — błąd nie zniknął. Odkryto DRUGI, osobny rekord tej samej nazwy w środowisku `development` (stary, z 09.08, dane sprzed miesiąca) — CloudKit trzyma Development i Production jako całkiem osobne bazy. Skasowano i ten — błąd WCIĄŻ wracał identyczny. Obie teorie (konflikt właściciela) okazały się fałszywym tropem: rekord skasowany w obu środowiskach, a `.permissionFailure` nadal się pojawiał przy tworzeniu zupełnie NOWEGO rekordu, mimo `GRANT CREATE TO "_icloud"` w schemacie.
+
+Prawdziwa przyczyna znaleziona przez tymczasowy debug (dopisany na ekranie błędu, `#if DEBUG`, usunięty po diagnozie): pełny `CKError` pokazał `"CREATE operation not permitted"` (nie WRITE — create, na nieistniejącym jeszcze rekordzie), a osobno sprawdzone `CKContainer.accountStatus()` zwracało **`.temporarilyUnavailable`**. `userRecordID()` zwrócone w tym stanie było DOKŁADNIE tym samym ID co widniało jako twórca skasowanych rekordów — czyli od początku było to jedno konto, zero mismatchu tożsamości (pierwsza diagnoza była błędna).
+
+`.temporarilyUnavailable` = user miał **niezaakceptowany regulamin iCloud** na telefonie — Apple globalnie blokuje zapisy CloudKit (nie tylko dla tej appki) dopóki user nie zaakceptuje warunków w Ustawieniach. Po akceptacji: kolejny `refresh()` w appce zapisał się poprawnie od razu (potwierdzone bezpośrednio w CloudKit, `cktool query-records` — "Piotr", 1459 pkt, świeży timestamp). Ranking od tej pory działa normalnie.
+
+**Wniosek na przyszłość**: `.permissionFailure` z CloudKit nie zawsze znaczy "konflikt właściciela rekordu" — może też znaczyć "stan konta iCloud nie jest w pełni ustalony" (niezaakceptowany regulamin, przejściowy problem sesji Apple ID, itp.). `friendlyMessage(for:)` zostaje z ogólnym tekstem (oba scenariusze są dla usera nie do odróżnienia bez dodatkowego zapytania o `accountStatus`), ale komentarz w kodzie zaktualizowany z pełnym kontekstem.
+
+Przy okazji znaleziony i usunięty niegroźny "śmieć" w projekcie: zdublowany plik `AIDirectorEngine 2.swift` (identyczna zawartość co `AIDirectorEngine.swift`, klasyczny artefakt Findera po duplikacie), nigdy niedodany do gita, ale blokujący kompilację lokalnego builda Debug ("ambiguous for type lookup").

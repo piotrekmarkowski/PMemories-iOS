@@ -58,6 +58,21 @@ enum LeaderboardService {
         guard let ckError = error as? CKError else { return error.localizedDescription }
         switch ckError.code {
         case .permissionFailure:
+            // 15.09.2026 — realny przypadek złapany na żywo: `.permissionFailure`
+            // ("CREATE operation not permitted") na rekordzie który w ogóle
+            // jeszcze nie istniał w CloudKit — więc to NIE był konflikt
+            // właściciela istniejącego rekordu (pierwotna teoria, patrz stary
+            // komentarz niżej), tylko `CKContainer.accountStatus() ==
+            // .temporarilyUnavailable`: telefon miał niezaakceptowany
+            // regulamin iCloud, więc CloudKit odmawiał KAŻDEGO zapisu do
+            // czasu zaakceptowania go w Ustawieniach. Diagnoza przez
+            // tymczasowy debug-dump w UI (usunięty), porównanie
+            // `userRecordID` z `cktool query-records` potwierdziło że to
+            // cały czas TO SAMO konto — zero mismatchu tożsamości.
+            // Zostawiony tekst niżej nadal trafny jako ogólna wskazówka
+            // (rzeczywista przyczyna `.permissionFailure` w praktyce bywa
+            // różna — konflikt właściciela LUB stan konta iCloud), appka
+            // nie ma jak same to rozróżnić bez dodatkowego zapytania.
             return L("This score can't be saved under your current Apple ID — it looks like it was already created by a different iCloud account. Contact the developer if this keeps happening.")
         case .notAuthenticated:
             return L("Sign in to iCloud in Settings to use the Ranking.")
