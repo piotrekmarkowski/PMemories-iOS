@@ -224,10 +224,10 @@ jobs:
           EXPLANATION=$(cat explanation.txt 2>/dev/null || echo "(zobacz pełny log pod linkiem niżej)")
           COMMIT_MSG=$(echo "$RAW_COMMIT_MSG" | head -1)
           if [ "$CI_LANG" = "en" ]; then
-            MESSAGE=$(printf '❌ PMemories CI FAILED\nBranch: %s\nCommit: %s\n\n%s\n\n%s' "$BRANCH" "$COMMIT_MSG" "$EXPLANATION" "$RUN_URL")
+            MESSAGE=$(printf '❌ PMemories iOS CI FAILED\nBranch: %s\nCommit: %s\n\n%s\n\n%s' "$BRANCH" "$COMMIT_MSG" "$EXPLANATION" "$RUN_URL")
             BUTTON_TEXT="🔧 Fix"
           else
-            MESSAGE=$(printf '❌ PMemories CI FAILED\nGałąź: %s\nCommit: %s\n\n%s\n\n%s' "$BRANCH" "$COMMIT_MSG" "$EXPLANATION" "$RUN_URL")
+            MESSAGE=$(printf '❌ PMemories iOS CI FAILED\nGałąź: %s\nCommit: %s\n\n%s\n\n%s' "$BRANCH" "$COMMIT_MSG" "$EXPLANATION" "$RUN_URL")
             BUTTON_TEXT="🔧 Napraw"
           fi
           # Przycisk "🔧 Napraw" — callback_data niesie "fix:ios:<run_id>",
@@ -252,9 +252,9 @@ jobs:
         run: |
           COMMIT_MSG=$(echo "$RAW_COMMIT_MSG" | head -1)
           if [ "$CI_LANG" = "en" ]; then
-            MESSAGE=$(printf '✅ PMemories CI passed\nBranch: %s\nCommit: %s' "$BRANCH" "$COMMIT_MSG")
+            MESSAGE=$(printf '✅ PMemories iOS CI passed\nBranch: %s\nCommit: %s' "$BRANCH" "$COMMIT_MSG")
           else
-            MESSAGE=$(printf '✅ PMemories CI passed\nGałąź: %s\nCommit: %s' "$BRANCH" "$COMMIT_MSG")
+            MESSAGE=$(printf '✅ PMemories iOS CI passed\nGałąź: %s\nCommit: %s' "$BRANCH" "$COMMIT_MSG")
           fi
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \

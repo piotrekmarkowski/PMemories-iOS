@@ -99,15 +99,15 @@ jobs:
         run: |
           if [ "${{ steps.commit.outputs.changed }}" = "true" ]; then
             if [ "$CI_LANG" = "en" ]; then
-              MESSAGE=$(printf '🔧 Auto-fix ready for review\n\n%s' "${{ steps.pr.outputs.pr_url }}")
+              MESSAGE=$(printf '🔧 iOS auto-fix ready for review\n\n%s' "${{ steps.pr.outputs.pr_url }}")
             else
-              MESSAGE=$(printf '🔧 Auto-fix gotowy do przejrzenia\n\n%s' "${{ steps.pr.outputs.pr_url }}")
+              MESSAGE=$(printf '🔧 Auto-fix (iOS) gotowy do przejrzenia\n\n%s' "${{ steps.pr.outputs.pr_url }}")
             fi
           else
             if [ "$CI_LANG" = "en" ]; then
-              MESSAGE=$(printf '🤷 Claude could not find/fix the error from run #%s automatically — needs manual review.' "${{ github.event.inputs.run_id }}")
+              MESSAGE=$(printf '🤷 Claude could not find/fix the iOS error from run #%s automatically — needs manual review.' "${{ github.event.inputs.run_id }}")
             else
-              MESSAGE=$(printf '🤷 Claude nie znalazł/nie naprawił błędu z runu #%s automatycznie — potrzebna ręczna analiza.' "${{ github.event.inputs.run_id }}")
+              MESSAGE=$(printf '🤷 Claude nie znalazł/nie naprawił błędu iOS z runu #%s automatycznie — potrzebna ręczna analiza.' "${{ github.event.inputs.run_id }}")
             fi
           fi
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
