@@ -3713,3 +3713,17 @@ Prawdziwa przyczyna znaleziona przez tymczasowy debug (dopisany na ekranie błę
 **Wniosek na przyszłość**: `.permissionFailure` z CloudKit nie zawsze znaczy "konflikt właściciela rekordu" — może też znaczyć "stan konta iCloud nie jest w pełni ustalony" (niezaakceptowany regulamin, przejściowy problem sesji Apple ID, itp.). `friendlyMessage(for:)` zostaje z ogólnym tekstem (oba scenariusze są dla usera nie do odróżnienia bez dodatkowego zapytania o `accountStatus`), ale komentarz w kodzie zaktualizowany z pełnym kontekstem.
 
 Przy okazji znaleziony i usunięty niegroźny "śmieć" w projekcie: zdublowany plik `AIDirectorEngine 2.swift` (identyczna zawartość co `AIDirectorEngine.swift`, klasyczny artefakt Findera po duplikacie), nigdy niedodany do gita, ale blokujący kompilację lokalnego builda Debug ("ambiguous for type lookup").
+
+## 15.09.2026 (ciąg dalszy) — CI/CD Etap 4: menu bota, skan na żądanie, PL/EN
+
+User: "chcę mieć menu w moim CI bocie... czy mogę włączyć skan żeby mi przejrzał wszystkie błędy na zawołanie... i żeby błędy były zrozumiałe... i żeby uruchomił naprawę" + "język polski i angielski żeby był do wyboru".
+
+**Zrobione:**
+- `ci.yml`: dodany trigger `workflow_dispatch` (skan można teraz odpalić z zewnątrz, nie tylko push/PR/harmonogram).
+- Nowy krok "Explain errors in plain language" — przy failu, `claude -p` (ten sam `CLAUDE_CODE_OAUTH_TOKEN`, ale bez Edit/Write/Bash — czysty odczyt/analiza, fizycznie nic nie może zmienić) tłumaczy surowe błędy kompilatora na 3-4 zdania po ludzku, PL albo EN wg `vars.CI_LANG`. Zastępuje dawny surowy `grep "error:"` w wiadomości Telegram.
+- **Złapany od razu przy pisaniu**: dokładnie ta sama pułapka co przy `COMMIT_MSG` wcześniej — wieloliniowy `PROMPT="tekst\n\ntekst"` wprost w `run: |` łamie wcięcie YAML. Naprawione tym samym lekiem: `printf '%s\n\n%s' "..." "$ERRORS"` na jednej linii. `python3 -c "import yaml; yaml.safe_load(...)"` dodane jako szybka lokalna walidacja PRZED pushem, zamiast łapać to dopiero na żywym runie jak poprzednio.
+- `vars.CI_LANG` (zmienna repo GitHub, jawna nie-sekretna) — `pl`/`en`, domyślnie `pl`. Czytana przez `ci.yml` (treść wyjaśnienia + wiadomości sukces/fail + tekst przycisku) i `auto-fix.yml` (wiadomość "gotowe do przejrzenia").
+- `telegram-bot/listener.py` (VPS, rozbudowany z samego przycisku "Napraw"): menu komend przez `setMyCommands` — `/scan` (workflow_dispatch na `ci.yml` na żądanie), `/status` (ostatni run), `/lang` (przyciski PL/EN → zapis do `vars.CI_LANG` przez GitHub API), `/help`. Kod bota + `pmemories-ci-bot.service` (systemd) trafiły też do repo (`telegram-bot/`) dla wersjonowania — realnie działają z `/opt/pmemories-ci-bot/` na VPS.
+- Systemd unit wdrożony i `enable`'owany na VPS (`scp` + `systemctl daemon-reload && enable` — to akurat NIE zostało zablokowane przez klasyfikator, w przeciwieństwie do plików z sekretami).
+
+**Nadal blokujące (ten sam rodzaj tarcia co zawsze z sekretami)**: `/opt/pmemories-ci-bot/env` (`TELEGRAM_BOT_TOKEN`+`GITHUB_TOKEN`) wciąż nie istnieje na VPS — user musi go stworzyć ręcznie (dokładna komenda w `telegram-bot/README.md`), potem `systemctl start pmemories-ci-bot`. Bez tego menu/`/scan`/`/lang` fizycznie nie działają (sam plik `listener.py` już tam leży i service jest `enabled`, tylko nie odpalony).

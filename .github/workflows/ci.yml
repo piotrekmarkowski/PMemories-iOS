@@ -43,6 +43,12 @@ on:
   # czasu powiadomienie przychodzi o 13:00 zamiast 12:00.
   schedule:
     - cron: '0 11 * * *'
+  # 15.09.2026 — user: "chcę mieć menu w moim CI bocie... czy mogę włączyć
+  # skan żeby mi przejrzał wszystkie błędy na zawołanie". `workflow_dispatch`
+  # pozwala odpalić TEN SAM build+testy ręcznie z zewnątrz (przycisk/komenda
+  # `/scan` w bocie Telegram, patrz `telegram-bot/listener.py`) — nie tylko
+  # automatycznie przy pushu/PR/harmonogramie.
+  workflow_dispatch:
 
 jobs:
   build:
@@ -156,23 +162,80 @@ jobs:
       # podstawianie tekstu w skrypt shella. Dodatkowo i tak ucinamy do
       # PIERWSZEJ LINII (`head -1`) — cały wieloakapitowy opis commita byłby
       # nieczytelny w powiadomieniu na telefonie.
+      # 15.09.2026 — user: "jak mi pokaże błędy żeby były zrozumiałe dla
+      # mnie" — surowe linijki kompilatora Swift ("has no member", "cannot
+      # find type in scope") są nieczytelne bez znajomości Swifta. Ten krok
+      # woła Claude Code w trybie bezobsługowym (`claude -p`, ten sam
+      # `CLAUDE_CODE_OAUTH_TOKEN` co `auto-fix.yml`, ale TYLKO odczyt —
+      # bez `--allowedTools` z Edit/Write/Bash, więc fizycznie nic nie może
+      # zmienić) i prosi o krótkie, polskie wyjaśnienie PRZYCZYNY po ludzku,
+      # nie o poprawkę (to wciąż robi dopiero `auto-fix.yml` po kliknięciu
+      # "🔧 Napraw"). Zapisane do pliku (nie `$GITHUB_OUTPUT`) — ten sam
+      # powód co przy `RAW_COMMIT_MSG` niżej: wynik może zawierać nowe
+      # linie/cudzysłowy, plik + `printf %s` jest na to odporne.
+      # 15.09.2026 — user: "język polski i angielski żeby był do wyboru" —
+      # `vars.CI_LANG` to zmienna repo (GitHub Actions "Variables", NIE
+      # "Secrets" — jawny, nietajny wybór), ustawiana zdalnie komendą
+      # `/lang` w bocie Telegram (patrz `telegram-bot/listener.py`, które
+      # woła GitHub API żeby ją zmienić). Domyślnie `pl` gdy jeszcze nikt
+      # jej nie ustawił.
+      - name: Explain errors in plain language
+        if: failure()
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CI_LANG: ${{ vars.CI_LANG || 'pl' }}
+        run: |
+          ERRORS=$(grep -h "error:" build.log test.log 2>/dev/null | head -20)
+          if [ -z "$ERRORS" ]; then
+            if [ "$CI_LANG" = "en" ]; then
+              echo "(no clear compiler errors in the log — see the full log via the link below)" > explanation.txt
+            else
+              echo "(brak jasnych błędów kompilatora w logu — zobacz pełny log pod linkiem)" > explanation.txt
+            fi
+          else
+            npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
+            # UWAGA: `PROMPT="...tekst na kilku liniach..."` (dosłowne nowe
+            # linie w środku przypisania) łamie wcięcie bloku YAML `run: |`
+            # dokładnie tak samo jak przy `COMMIT_MSG` wyżej w tym pliku —
+            # `printf %s\n%s` na JEDNEJ linii omija to całkowicie.
+            if [ "$CI_LANG" = "en" ]; then
+              PROMPT=$(printf 'Explain IN ENGLISH, in plain language, with no programming jargon, what went wrong in this iOS app (Swift/SwiftUI) based on the compiler errors below. Max 3-4 sentences. Explain the CAUSE, do not propose a fix (that is a separate step). Errors:\n\n%s' "$ERRORS")
+            else
+              PROMPT=$(printf 'Wytłumacz PO POLSKU, prostym językiem, bez żargonu programistycznego, co poszło nie tak w tej aplikacji iOS (Swift/SwiftUI) na podstawie poniższych błędów kompilatora. Maksymalnie 3-4 zdania. Wytłumacz PRZYCZYNĘ, nie proponuj poprawki (to osobny krok). Błędy:\n\n%s' "$ERRORS")
+            fi
+            claude -p "$PROMPT" --max-turns 1 > explanation.txt 2>/dev/null
+            if [ ! -s explanation.txt ]; then
+              if [ "$CI_LANG" = "en" ]; then
+                echo "(couldn't generate an explanation — see the raw errors via the link below)" > explanation.txt
+              else
+                echo "(nie udało się wygenerować wyjaśnienia — zobacz surowe błędy pod linkiem)" > explanation.txt
+              fi
+            fi
+          fi
+
       - name: Notify Telegram on failure
         if: failure()
         env:
           RAW_COMMIT_MSG: ${{ github.event.head_commit.message || github.event.pull_request.title || 'Codzienne sprawdzenie (harmonogram)' }}
           BRANCH: ${{ github.head_ref || github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CI_LANG: ${{ vars.CI_LANG || 'pl' }}
         run: |
-          ERRORS=$(grep -h "error:" build.log test.log 2>/dev/null | head -5)
-          if [ -z "$ERRORS" ]; then ERRORS="(zobacz pełny log pod linkiem niżej)"; fi
+          EXPLANATION=$(cat explanation.txt 2>/dev/null || echo "(zobacz pełny log pod linkiem niżej)")
           COMMIT_MSG=$(echo "$RAW_COMMIT_MSG" | head -1)
-          MESSAGE=$(printf '❌ PMemories CI FAILED\nGałąź: %s\nCommit: %s\n\nBłędy:\n%s\n\n%s' "$BRANCH" "$COMMIT_MSG" "$ERRORS" "$RUN_URL")
+          if [ "$CI_LANG" = "en" ]; then
+            MESSAGE=$(printf '❌ PMemories CI FAILED\nBranch: %s\nCommit: %s\n\n%s\n\n%s' "$BRANCH" "$COMMIT_MSG" "$EXPLANATION" "$RUN_URL")
+            BUTTON_TEXT="🔧 Fix"
+          else
+            MESSAGE=$(printf '❌ PMemories CI FAILED\nGałąź: %s\nCommit: %s\n\n%s\n\n%s' "$BRANCH" "$COMMIT_MSG" "$EXPLANATION" "$RUN_URL")
+            BUTTON_TEXT="🔧 Napraw"
+          fi
           # Przycisk "🔧 Napraw" — callback_data niesie run_id, żeby listener
           # na VPS (`telegram-bot/`) wiedział KTÓRY run przekazać dalej do
           # `auto-fix.yml` (workflow_dispatch). Sam button NIE naprawia
           # nic sam z siebie — dopiero jego kliknięcie odpala osobny
           # workflow, patrz komentarz w `auto-fix.yml`.
-          KEYBOARD="{\"inline_keyboard\":[[{\"text\":\"🔧 Napraw\",\"callback_data\":\"fix:${{ github.run_id }}\"}]]}"
+          KEYBOARD="{\"inline_keyboard\":[[{\"text\":\"${BUTTON_TEXT}\",\"callback_data\":\"fix:${{ github.run_id }}\"}]]}"
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=${MESSAGE}" \
@@ -183,9 +246,14 @@ jobs:
         env:
           RAW_COMMIT_MSG: ${{ github.event.head_commit.message || github.event.pull_request.title || 'Codzienne sprawdzenie (harmonogram)' }}
           BRANCH: ${{ github.head_ref || github.ref_name }}
+          CI_LANG: ${{ vars.CI_LANG || 'pl' }}
         run: |
           COMMIT_MSG=$(echo "$RAW_COMMIT_MSG" | head -1)
-          MESSAGE=$(printf '✅ PMemories CI passed\nGałąź: %s\nCommit: %s' "$BRANCH" "$COMMIT_MSG")
+          if [ "$CI_LANG" = "en" ]; then
+            MESSAGE=$(printf '✅ PMemories CI passed\nBranch: %s\nCommit: %s' "$BRANCH" "$COMMIT_MSG")
+          else
+            MESSAGE=$(printf '✅ PMemories CI passed\nGałąź: %s\nCommit: %s' "$BRANCH" "$COMMIT_MSG")
+          fi
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=${MESSAGE}" > /dev/null

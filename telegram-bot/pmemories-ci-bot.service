@@ -1,0 +1,15 @@
+[Unit]
+Description=PMemories CI Telegram bot listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/opt/pmemories-ci-bot/env
+ExecStart=/usr/bin/python3 /opt/pmemories-ci-bot/listener.py
+WorkingDirectory=/opt/pmemories-ci-bot
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

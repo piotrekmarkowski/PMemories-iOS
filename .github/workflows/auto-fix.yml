@@ -91,13 +91,24 @@ jobs:
             --base main --head "auto-fix/run-${{ github.event.inputs.run_id }}")
           echo "pr_url=$URL" >> "$GITHUB_OUTPUT"
 
+      # 15.09.2026 — te same `vars.CI_LANG`/PL-EN co `ci.yml`, patrz komentarz tam.
       - name: Notify Telegram
         if: always()
+        env:
+          CI_LANG: ${{ vars.CI_LANG || 'pl' }}
         run: |
           if [ "${{ steps.commit.outputs.changed }}" = "true" ]; then
-            MESSAGE=$(printf '🔧 Auto-fix gotowy do przejrzenia\n\n%s' "${{ steps.pr.outputs.pr_url }}")
+            if [ "$CI_LANG" = "en" ]; then
+              MESSAGE=$(printf '🔧 Auto-fix ready for review\n\n%s' "${{ steps.pr.outputs.pr_url }}")
+            else
+              MESSAGE=$(printf '🔧 Auto-fix gotowy do przejrzenia\n\n%s' "${{ steps.pr.outputs.pr_url }}")
+            fi
           else
-            MESSAGE=$(printf '🤷 Claude nie znalazł/nie naprawił błędu z runu #%s automatycznie — potrzebna ręczna analiza.' "${{ github.event.inputs.run_id }}")
+            if [ "$CI_LANG" = "en" ]; then
+              MESSAGE=$(printf '🤷 Claude could not find/fix the error from run #%s automatically — needs manual review.' "${{ github.event.inputs.run_id }}")
+            else
+              MESSAGE=$(printf '🤷 Claude nie znalazł/nie naprawił błędu z runu #%s automatycznie — potrzebna ręczna analiza.' "${{ github.event.inputs.run_id }}")
+            fi
           fi
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
