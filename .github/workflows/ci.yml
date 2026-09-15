@@ -230,12 +230,14 @@ jobs:
             MESSAGE=$(printf '❌ PMemories CI FAILED\nGałąź: %s\nCommit: %s\n\n%s\n\n%s' "$BRANCH" "$COMMIT_MSG" "$EXPLANATION" "$RUN_URL")
             BUTTON_TEXT="🔧 Napraw"
           fi
-          # Przycisk "🔧 Napraw" — callback_data niesie run_id, żeby listener
-          # na VPS (`telegram-bot/`) wiedział KTÓRY run przekazać dalej do
-          # `auto-fix.yml` (workflow_dispatch). Sam button NIE naprawia
-          # nic sam z siebie — dopiero jego kliknięcie odpala osobny
-          # workflow, patrz komentarz w `auto-fix.yml`.
-          KEYBOARD="{\"inline_keyboard\":[[{\"text\":\"${BUTTON_TEXT}\",\"callback_data\":\"fix:${{ github.run_id }}\"}]]}"
+          # Przycisk "🔧 Napraw" — callback_data niesie "fix:ios:<run_id>",
+          # żeby listener na VPS (`telegram-bot/`, TERAZ wspólny dla
+          # PMemories-iOS i PMemories-Android, 15.09.2026) wiedział KTÓRY
+          # run w KTÓRYM repo przekazać dalej do `auto-fix.yml`
+          # (workflow_dispatch). Sam button NIE naprawia nic sam z siebie —
+          # dopiero jego kliknięcie odpala osobny workflow, patrz komentarz
+          # w `auto-fix.yml`.
+          KEYBOARD="{\"inline_keyboard\":[[{\"text\":\"${BUTTON_TEXT}\",\"callback_data\":\"fix:ios:${{ github.run_id }}\"}]]}"
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=${MESSAGE}" \
