@@ -110,6 +110,10 @@ jobs:
               MESSAGE=$(printf '🤷 Claude nie znalazł/nie naprawił błędu iOS z runu #%s automatycznie — potrzebna ręczna analiza.' "${{ github.event.inputs.run_id }}")
             fi
           fi
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+          TG_RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --data-urlencode "text=${MESSAGE}" > /dev/null
+            --data-urlencode "text=${MESSAGE}")
+          if ! echo "$TG_RESPONSE" | grep -q '"ok":true'; then
+            echo "::error::Telegram sendMessage nie powiodło się: $TG_RESPONSE"
+            exit 1
+          fi

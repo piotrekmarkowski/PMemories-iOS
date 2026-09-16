@@ -36,13 +36,17 @@ on:
   # o 12 PM" — codzienne sprawdzenie `main`, niezależnie od tego czy ktoś
   # coś pushnął. Zaplanowane triggery (`schedule`) ZAWSZE odpalają się na
   # gałęzi domyślnej (main), niezależnie gdzie leży ten plik. Cron GitHuba
-  # liczy czas w UTC, nie zna stref czasowych/czasu letniego — 11:00 UTC =
-  # 12:00 w UK w czasie letnim (BST, aktualnie), ale 11:00 w czasie zimowym
-  # (GMT) po przejściu na czas zimowy pod koniec października. Do
-  # poprawienia ręcznie na `0 12 * * *`, jeśli user zauważy że po zmianie
-  # czasu powiadomienie przychodzi o 13:00 zamiast 12:00.
+  # liczy czas w UTC, nie zna stref czasowych/czasu letniego.
+  #
+  # 16.09.2026 — POPRAWKA: pierwsza wersja (`0 11 * * *`) była policzona pod
+  # UK (BST=UTC+1), nie pod usera (Polska, CEST=UTC+2) — stąd realny skan
+  # leciał o 13:00 czasu polskiego, nie o 12:00, i user nie widział
+  # powiadomienia "w południe" mimo że skan i tak przechodził. `0 10 * * *`
+  # UTC = 12:00 w Polsce w czasie letnim (CEST, aktualnie). Do ręcznej
+  # poprawki na `0 11 * * *`, gdy Polska przejdzie na czas zimowy (CET,
+  # UTC+1) pod koniec października — inaczej znów przesunie się o godzinę.
   schedule:
-    - cron: '0 11 * * *'
+    - cron: '0 10 * * *'
   # 15.09.2026 — user: "chcę mieć menu w moim CI bocie... czy mogę włączyć
   # skan żeby mi przejrzał wszystkie błędy na zawołanie". `workflow_dispatch`
   # pozwala odpalić TEN SAM build+testy ręcznie z zewnątrz (przycisk/komenda
@@ -238,10 +242,19 @@ jobs:
           # dopiero jego kliknięcie odpala osobny workflow, patrz komentarz
           # w `auto-fix.yml`.
           KEYBOARD="{\"inline_keyboard\":[[{\"text\":\"${BUTTON_TEXT}\",\"callback_data\":\"fix:ios:${{ github.run_id }}\"}]]}"
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+          # 16.09.2026 — poprzednio ">/dev/null" wyrzucał odpowiedź Telegrama,
+          # więc nawet gdy dostawa faktycznie się nie udała (zły chat_id,
+          # zablokowany bot, itp.), ten krok i tak pokazywał zielone "success".
+          # Teraz łapiemy odpowiedź i sprawdzamy "ok":true — realna awaria
+          # wysyłki jest widoczna jako czerwony krok, nie cicha.
+          TG_RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=${MESSAGE}" \
-            --data-urlencode "reply_markup=${KEYBOARD}" > /dev/null
+            --data-urlencode "reply_markup=${KEYBOARD}")
+          if ! echo "$TG_RESPONSE" | grep -q '"ok":true'; then
+            echo "::error::Telegram sendMessage nie powiodło się: $TG_RESPONSE"
+            exit 1
+          fi
 
       - name: Notify Telegram on success
         if: success()
@@ -256,6 +269,10 @@ jobs:
           else
             MESSAGE=$(printf '✅ PMemories iOS CI passed\nGałąź: %s\nCommit: %s' "$BRANCH" "$COMMIT_MSG")
           fi
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+          TG_RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             --data-urlencode "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --data-urlencode "text=${MESSAGE}" > /dev/null
+            --data-urlencode "text=${MESSAGE}")
+          if ! echo "$TG_RESPONSE" | grep -q '"ok":true'; then
+            echo "::error::Telegram sendMessage nie powiodło się: $TG_RESPONSE"
+            exit 1
+          fi
