@@ -45,9 +45,26 @@ struct AssetIntegrityTests {
     /// testu na twardo zablokowałoby CI za coś, co wymaga osobnej decyzji
     /// (dokończyć ~300 naklejek, czy wyczyścić słownik) — nie za regresję.
     /// PRZYWRÓĆ ten test (usuń `.disabled`), gdy ta decyzja zapadnie.
-    @Test("Wszystkie assety Passportu (worldStickerAssetByCountryCode) istnieją", .disabled("~300 assetów sticker_* świadomie jeszcze niedostarczonych, patrz komentarz — nie regresja"))
+    @Test("Wszystkie assety Passportu (worldStickerAssetByCountryCode) istnieją", .disabled("~170 assetów sticker_* świadomie jeszcze niedostarczonych, patrz komentarz — nie regresja"))
     func passportAssetsExist() {
         let missing = Self.missingAssets(in: worldStickerAssetByCountryCode)
+        #expect(missing.isEmpty, "\(Self.formatMissing(missing))")
+    }
+
+    /// 17.09.2026 — pierwsze 45 prawdziwych `sticker_*` (Europa), wycięte z
+    /// arkuszy ChatGPT "World Travel Stickers". OSTRY test na TĘ konkretną
+    /// podgrupę — reszta (~170) zostaje `.disabled` wyżej, dopóki nie
+    /// zostaną dostarczone.
+    @Test("Europejskie assety Passportu (pierwsza dostarczona partia) istnieją")
+    func passportEuropeAssetsExist() {
+        let europeCodes: Set<String> = [
+            "DE", "GR", "HU", "IS", "IE", "IT", "XK", "LV", "LI", "LT", "LU", "MT", "MD", "MC", "ME",
+            "NL", "MK", "NO", "PL", "PT", "RO", "RU", "SM", "RS", "SK", "SI", "ES", "SE", "CH", "TR",
+            "AL", "AD", "AT", "BY", "BE", "BA", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "GE",
+        ]
+        let subset = worldStickerAssetByCountryCode.filter { europeCodes.contains($0.key) }
+        #expect(subset.count == 45, "Oczekiwano 45 europejskich wpisów w słowniku, jest \(subset.count)")
+        let missing = Self.missingAssets(in: subset)
         #expect(missing.isEmpty, "\(Self.formatMissing(missing))")
     }
 }
