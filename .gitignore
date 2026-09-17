@@ -9,3 +9,5 @@ build/
 xcuserdata/
 *.xcuserstate
 DerivedData/
+__pycache__/
+*.pyc
