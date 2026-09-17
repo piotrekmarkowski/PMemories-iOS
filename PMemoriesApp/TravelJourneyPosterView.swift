@@ -1186,7 +1186,11 @@ struct TravelJourneyPosterView: View {
                 .frame(height: 85)
         } else {
             VStack(spacing: 4) {
-                if let oldAsset = worldStickerAssetByCountryCode[stamp.code] {
+                // 17.09.2026 — sam bug co w `TravelPassportView` (patrz
+                // komentarz tam): `worldStickerAssetByCountryCode` ma dziś
+                // zero prawdziwych plików, sam fakt bycia kluczem w
+                // słowniku nie znaczy że `Image` ma co narysować.
+                if let oldAsset = worldStickerAssetByCountryCode[stamp.code], UIImage(named: oldAsset) != nil {
                     Image(oldAsset).resizable().aspectRatio(contentMode: .fit).frame(height: 52)
                 } else {
                     Text(stamp.flag).font(.system(size: 34))

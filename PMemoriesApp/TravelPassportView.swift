@@ -275,7 +275,18 @@ private struct PassportStampView: View {
     }
 
     var body: some View {
-        if let assetName = worldStickerAssetByCountryCode[country.countryCode] {
+        // 17.09.2026 — BUG naprawiony: warunek sprawdzał tylko czy kod kraju
+        // JEST w słowniku (prawie zawsze tak, ~300 wpisów), nie czy asset
+        // `sticker_*` FAKTYCZNIE istnieje w Assets.xcassets (nie istnieje —
+        // to był świadomy "tymczasowy podgląd" sprzed dwóch tygodni, zero
+        // plików kiedykolwiek dodanych). Efekt: dla większości odwiedzonych
+        // krajów renderował się pusty `Image` zamiast działającego fallbacku
+        // (flaga+tekst). `UIImage(named:) != nil` dodatkowo weryfikuje że
+        // asset naprawdę jest w bundlu — gdy w przyszłości realne pliki
+        // `sticker_*` zostaną dodane, ten sam kod zacznie ich używać bez
+        // dalszych zmian (progresywne wzbogacanie, nie trzeba pamiętać żeby
+        // to odkomentować).
+        if let assetName = worldStickerAssetByCountryCode[country.countryCode], UIImage(named: assetName) != nil {
             // Obrót WRÓCIŁ (03.09.2026, user: "żeby nie wyglądało jak od
             // linijki") — ale tym razem z `scaleEffect` lekko pomniejszającym
             // PRZED obrotem, żeby rotowany prostokąt zmieścił się z powrotem
